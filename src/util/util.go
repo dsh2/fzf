@@ -1,14 +1,28 @@
 package util
 
-// #include <unistd.h>
-import "C"
-
 import (
 	"math"
 	"os"
-	"os/exec"
 	"time"
+
+	"github.com/junegunn/go-isatty"
+	"github.com/junegunn/go-runewidth"
 )
+
+var _runeWidths = make(map[rune]int)
+
+// RuneWidth returns rune width
+func RuneWidth(r rune, prefixWidth int, tabstop int) int {
+	if r == '\t' {
+		return tabstop - prefixWidth%tabstop
+	} else if w, found := _runeWidths[r]; found {
+		return w
+	} else {
+		w := Max(runewidth.RuneWidth(r), 1)
+		_runeWidths[r] = w
+		return w
+	}
+}
 
 // Max returns the largest integer
 func Max(first int, second int) int {
@@ -95,14 +109,5 @@ func DurWithin(
 
 // IsTty returns true is stdin is a terminal
 func IsTty() bool {
-	return int(C.isatty(C.int(os.Stdin.Fd()))) != 0
-}
-
-// ExecCommand executes the given command with $SHELL
-func ExecCommand(command string) *exec.Cmd {
-	shell := os.Getenv("SHELL")
-	if len(shell) == 0 {
-		shell = "sh"
-	}
-	return exec.Command(shell, "-c", command)
+	return isatty.IsTerminal(os.Stdin.Fd())
 }

@@ -2,9 +2,10 @@ package fzf
 
 import (
 	"fmt"
+	"io/ioutil"
 	"testing"
 
-	"github.com/junegunn/fzf/src/curses"
+	"github.com/junegunn/fzf/src/tui"
 	"github.com/junegunn/fzf/src/util"
 )
 
@@ -124,57 +125,58 @@ func TestIrrelevantNth(t *testing.T) {
 }
 
 func TestParseKeys(t *testing.T) {
-	pairs := parseKeyChords("ctrl-z,alt-z,f2,@,Alt-a,!,ctrl-G,J,g,ALT-enter,alt-SPACE", "")
+	pairs := parseKeyChords("ctrl-z,alt-z,f2,@,Alt-a,!,ctrl-G,J,g,ctrl-alt-a,ALT-enter,alt-SPACE", "")
 	check := func(i int, s string) {
 		if pairs[i] != s {
 			t.Errorf("%s != %s", pairs[i], s)
 		}
 	}
-	if len(pairs) != 11 {
-		t.Error(11)
+	if len(pairs) != 12 {
+		t.Error(12)
 	}
-	check(curses.CtrlZ, "ctrl-z")
-	check(curses.AltZ, "alt-z")
-	check(curses.F2, "f2")
-	check(curses.AltZ+'@', "@")
-	check(curses.AltA, "Alt-a")
-	check(curses.AltZ+'!', "!")
-	check(curses.CtrlA+'g'-'a', "ctrl-G")
-	check(curses.AltZ+'J', "J")
-	check(curses.AltZ+'g', "g")
-	check(curses.AltEnter, "ALT-enter")
-	check(curses.AltSpace, "alt-SPACE")
+	check(tui.CtrlZ, "ctrl-z")
+	check(tui.AltZ, "alt-z")
+	check(tui.F2, "f2")
+	check(tui.AltZ+'@', "@")
+	check(tui.AltA, "Alt-a")
+	check(tui.AltZ+'!', "!")
+	check(tui.CtrlA+'g'-'a', "ctrl-G")
+	check(tui.AltZ+'J', "J")
+	check(tui.AltZ+'g', "g")
+	check(tui.CtrlAltA, "ctrl-alt-a")
+	check(tui.CtrlAltM, "ALT-enter")
+	check(tui.AltSpace, "alt-SPACE")
 
 	// Synonyms
 	pairs = parseKeyChords("enter,Return,space,tab,btab,esc,up,down,left,right", "")
 	if len(pairs) != 9 {
 		t.Error(9)
 	}
-	check(curses.CtrlM, "Return")
-	check(curses.AltZ+' ', "space")
-	check(curses.Tab, "tab")
-	check(curses.BTab, "btab")
-	check(curses.ESC, "esc")
-	check(curses.Up, "up")
-	check(curses.Down, "down")
-	check(curses.Left, "left")
-	check(curses.Right, "right")
+	check(tui.CtrlM, "Return")
+	check(tui.AltZ+' ', "space")
+	check(tui.Tab, "tab")
+	check(tui.BTab, "btab")
+	check(tui.ESC, "esc")
+	check(tui.Up, "up")
+	check(tui.Down, "down")
+	check(tui.Left, "left")
+	check(tui.Right, "right")
 
 	pairs = parseKeyChords("Tab,Ctrl-I,PgUp,page-up,pgdn,Page-Down,Home,End,Alt-BS,Alt-BSpace,shift-left,shift-right,btab,shift-tab,return,Enter,bspace", "")
 	if len(pairs) != 11 {
 		t.Error(11)
 	}
-	check(curses.Tab, "Ctrl-I")
-	check(curses.PgUp, "page-up")
-	check(curses.PgDn, "Page-Down")
-	check(curses.Home, "Home")
-	check(curses.End, "End")
-	check(curses.AltBS, "Alt-BSpace")
-	check(curses.SLeft, "shift-left")
-	check(curses.SRight, "shift-right")
-	check(curses.BTab, "shift-tab")
-	check(curses.CtrlM, "Enter")
-	check(curses.BSpace, "bspace")
+	check(tui.Tab, "Ctrl-I")
+	check(tui.PgUp, "page-up")
+	check(tui.PgDn, "Page-Down")
+	check(tui.Home, "Home")
+	check(tui.End, "End")
+	check(tui.AltBS, "Alt-BSpace")
+	check(tui.SLeft, "shift-left")
+	check(tui.SRight, "shift-right")
+	check(tui.BTab, "shift-tab")
+	check(tui.CtrlM, "Enter")
+	check(tui.BSpace, "bspace")
 }
 
 func TestParseKeysWithComma(t *testing.T) {
@@ -191,86 +193,88 @@ func TestParseKeysWithComma(t *testing.T) {
 
 	pairs := parseKeyChords(",", "")
 	checkN(len(pairs), 1)
-	check(pairs, curses.AltZ+',', ",")
+	check(pairs, tui.AltZ+',', ",")
 
 	pairs = parseKeyChords(",,a,b", "")
 	checkN(len(pairs), 3)
-	check(pairs, curses.AltZ+'a', "a")
-	check(pairs, curses.AltZ+'b', "b")
-	check(pairs, curses.AltZ+',', ",")
+	check(pairs, tui.AltZ+'a', "a")
+	check(pairs, tui.AltZ+'b', "b")
+	check(pairs, tui.AltZ+',', ",")
 
 	pairs = parseKeyChords("a,b,,", "")
 	checkN(len(pairs), 3)
-	check(pairs, curses.AltZ+'a', "a")
-	check(pairs, curses.AltZ+'b', "b")
-	check(pairs, curses.AltZ+',', ",")
+	check(pairs, tui.AltZ+'a', "a")
+	check(pairs, tui.AltZ+'b', "b")
+	check(pairs, tui.AltZ+',', ",")
 
 	pairs = parseKeyChords("a,,,b", "")
 	checkN(len(pairs), 3)
-	check(pairs, curses.AltZ+'a', "a")
-	check(pairs, curses.AltZ+'b', "b")
-	check(pairs, curses.AltZ+',', ",")
+	check(pairs, tui.AltZ+'a', "a")
+	check(pairs, tui.AltZ+'b', "b")
+	check(pairs, tui.AltZ+',', ",")
 
 	pairs = parseKeyChords("a,,,b,c", "")
 	checkN(len(pairs), 4)
-	check(pairs, curses.AltZ+'a', "a")
-	check(pairs, curses.AltZ+'b', "b")
-	check(pairs, curses.AltZ+'c', "c")
-	check(pairs, curses.AltZ+',', ",")
+	check(pairs, tui.AltZ+'a', "a")
+	check(pairs, tui.AltZ+'b', "b")
+	check(pairs, tui.AltZ+'c', "c")
+	check(pairs, tui.AltZ+',', ",")
 
 	pairs = parseKeyChords(",,,", "")
 	checkN(len(pairs), 1)
-	check(pairs, curses.AltZ+',', ",")
+	check(pairs, tui.AltZ+',', ",")
 }
 
 func TestBind(t *testing.T) {
-	check := func(action actionType, expected actionType) {
-		if action != expected {
-			t.Errorf("%d != %d", action, expected)
-		}
-	}
-	checkString := func(action string, expected string) {
-		if action != expected {
-			t.Errorf("%d != %d", action, expected)
-		}
-	}
 	keymap := defaultKeymap()
-	execmap := make(map[int]string)
-	check(actBeginningOfLine, keymap[curses.CtrlA])
-	parseKeymap(keymap, execmap,
-		"ctrl-a:kill-line,ctrl-b:toggle-sort,c:page-up,alt-z:page-down,"+
-			"f1:execute(ls {}),f2:execute/echo {}, {}, {}/,f3:execute[echo '({})'],f4:execute;less {};,"+
-			"alt-a:execute@echo (,),[,],/,:,;,%,{}@,alt-b:execute;echo (,),[,],/,:,@,%,{};"+
-			",,:abort,::accept,X:execute:\nfoobar,Y:execute(baz)")
-	check(actKillLine, keymap[curses.CtrlA])
-	check(actToggleSort, keymap[curses.CtrlB])
-	check(actPageUp, keymap[curses.AltZ+'c'])
-	check(actAbort, keymap[curses.AltZ+','])
-	check(actAccept, keymap[curses.AltZ+':'])
-	check(actPageDown, keymap[curses.AltZ])
-	check(actExecute, keymap[curses.F1])
-	check(actExecute, keymap[curses.F2])
-	check(actExecute, keymap[curses.F3])
-	check(actExecute, keymap[curses.F4])
-	checkString("ls {}", execmap[curses.F1])
-	checkString("echo {}, {}, {}", execmap[curses.F2])
-	checkString("echo '({})'", execmap[curses.F3])
-	checkString("less {}", execmap[curses.F4])
-	checkString("echo (,),[,],/,:,;,%,{}", execmap[curses.AltA])
-	checkString("echo (,),[,],/,:,@,%,{}", execmap[curses.AltB])
-	checkString("\nfoobar,Y:execute(baz)", execmap[curses.AltZ+'X'])
+	check := func(keyName int, arg1 string, types ...actionType) {
+		if len(keymap[keyName]) != len(types) {
+			t.Errorf("invalid number of actions (%d != %d)", len(types), len(keymap[keyName]))
+			return
+		}
+		for idx, action := range keymap[keyName] {
+			if types[idx] != action.t {
+				t.Errorf("invalid action type (%d != %d)", types[idx], action.t)
+			}
+		}
+		if len(arg1) > 0 && keymap[keyName][0].a != arg1 {
+			t.Errorf("invalid action argument: (%s != %s)", arg1, keymap[keyName][0].a)
+		}
+	}
+	check(tui.CtrlA, "", actBeginningOfLine)
+	parseKeymap(keymap,
+		"ctrl-a:kill-line,ctrl-b:toggle-sort+up+down,c:page-up,alt-z:page-down,"+
+			"f1:execute(ls {})+abort,f2:execute/echo {}, {}, {}/,f3:execute[echo '({})'],f4:execute;less {};,"+
+			"alt-a:execute-Multi@echo (,),[,],/,:,;,%,{}@,alt-b:execute;echo (,),[,],/,:,@,%,{};,"+
+			"x:Execute(foo+bar),X:execute/bar+baz/"+
+			",,:abort,::accept,+:execute:++\nfoobar,Y:execute(baz)+up")
+	check(tui.CtrlA, "", actKillLine)
+	check(tui.CtrlB, "", actToggleSort, actUp, actDown)
+	check(tui.AltZ+'c', "", actPageUp)
+	check(tui.AltZ+',', "", actAbort)
+	check(tui.AltZ+':', "", actAccept)
+	check(tui.AltZ, "", actPageDown)
+	check(tui.F1, "ls {}", actExecute, actAbort)
+	check(tui.F2, "echo {}, {}, {}", actExecute)
+	check(tui.F3, "echo '({})'", actExecute)
+	check(tui.F4, "less {}", actExecute)
+	check(tui.AltZ+'x', "foo+bar", actExecute)
+	check(tui.AltZ+'X', "bar+baz", actExecute)
+	check(tui.AltA, "echo (,),[,],/,:,;,%,{}", actExecuteMulti)
+	check(tui.AltB, "echo (,),[,],/,:,@,%,{}", actExecute)
+	check(tui.AltZ+'+', "++\nfoobar,Y:execute(baz)+up", actExecute)
 
 	for idx, char := range []rune{'~', '!', '@', '#', '$', '%', '^', '&', '*', '|', ';', '/'} {
-		parseKeymap(keymap, execmap, fmt.Sprintf("%d:execute%cfoobar%c", idx%10, char, char))
-		checkString("foobar", execmap[curses.AltZ+int([]rune(fmt.Sprintf("%d", idx%10))[0])])
+		parseKeymap(keymap, fmt.Sprintf("%d:execute%cfoobar%c", idx%10, char, char))
+		check(tui.AltZ+int([]rune(fmt.Sprintf("%d", idx%10))[0]), "foobar", actExecute)
 	}
 
-	parseKeymap(keymap, execmap, "f1:abort")
-	check(actAbort, keymap[curses.F1])
+	parseKeymap(keymap, "f1:abort")
+	check(tui.F1, "", actAbort)
 }
 
 func TestColorSpec(t *testing.T) {
-	theme := curses.Dark256
+	theme := tui.Dark256
 	dark := parseTheme(theme, "dark")
 	if *dark != *theme {
 		t.Errorf("colors should be equivalent")
@@ -283,7 +287,7 @@ func TestColorSpec(t *testing.T) {
 	if *light == *theme {
 		t.Errorf("should not be equivalent")
 	}
-	if *light != *curses.Light256 {
+	if *light != *tui.Light256 {
 		t.Errorf("colors should be equivalent")
 	}
 	if light == theme {
@@ -294,23 +298,23 @@ func TestColorSpec(t *testing.T) {
 	if customized.Fg != 231 || customized.Bg != 232 {
 		t.Errorf("color not customized")
 	}
-	if *curses.Dark256 == *customized {
+	if *tui.Dark256 == *customized {
 		t.Errorf("colors should not be equivalent")
 	}
-	customized.Fg = curses.Dark256.Fg
-	customized.Bg = curses.Dark256.Bg
-	if *curses.Dark256 != *customized {
-		t.Errorf("colors should now be equivalent: %v, %v", curses.Dark256, customized)
+	customized.Fg = tui.Dark256.Fg
+	customized.Bg = tui.Dark256.Bg
+	if *tui.Dark256 != *customized {
+		t.Errorf("colors should now be equivalent: %v, %v", tui.Dark256, customized)
 	}
 
 	customized = parseTheme(theme, "fg:231,dark,bg:232")
-	if customized.Fg != curses.Dark256.Fg || customized.Bg == curses.Dark256.Bg {
+	if customized.Fg != tui.Dark256.Fg || customized.Bg == tui.Dark256.Bg {
 		t.Errorf("color not customized")
 	}
 }
 
 func TestParseNilTheme(t *testing.T) {
-	var theme *curses.ColorTheme
+	var theme *tui.ColorTheme
 	newTheme := parseTheme(theme, "prompt:12")
 	if newTheme != nil {
 		t.Errorf("color is disabled. keep it that way.")
@@ -326,25 +330,27 @@ func TestDefaultCtrlNP(t *testing.T) {
 		opts := defaultOptions()
 		parseOptions(opts, words)
 		postProcessOptions(opts)
-		if opts.Keymap[key] != expected {
+		if opts.Keymap[key][0].t != expected {
 			t.Error()
 		}
 	}
-	check([]string{}, curses.CtrlN, actDown)
-	check([]string{}, curses.CtrlP, actUp)
+	check([]string{}, tui.CtrlN, actDown)
+	check([]string{}, tui.CtrlP, actUp)
 
-	check([]string{"--bind=ctrl-n:accept"}, curses.CtrlN, actAccept)
-	check([]string{"--bind=ctrl-p:accept"}, curses.CtrlP, actAccept)
+	check([]string{"--bind=ctrl-n:accept"}, tui.CtrlN, actAccept)
+	check([]string{"--bind=ctrl-p:accept"}, tui.CtrlP, actAccept)
 
-	hist := "--history=/tmp/fzf-history"
-	check([]string{hist}, curses.CtrlN, actNextHistory)
-	check([]string{hist}, curses.CtrlP, actPreviousHistory)
+	f, _ := ioutil.TempFile("", "fzf-history")
+	f.Close()
+	hist := "--history=" + f.Name()
+	check([]string{hist}, tui.CtrlN, actNextHistory)
+	check([]string{hist}, tui.CtrlP, actPreviousHistory)
 
-	check([]string{hist, "--bind=ctrl-n:accept"}, curses.CtrlN, actAccept)
-	check([]string{hist, "--bind=ctrl-n:accept"}, curses.CtrlP, actPreviousHistory)
+	check([]string{hist, "--bind=ctrl-n:accept"}, tui.CtrlN, actAccept)
+	check([]string{hist, "--bind=ctrl-n:accept"}, tui.CtrlP, actPreviousHistory)
 
-	check([]string{hist, "--bind=ctrl-p:accept"}, curses.CtrlN, actNextHistory)
-	check([]string{hist, "--bind=ctrl-p:accept"}, curses.CtrlP, actAccept)
+	check([]string{hist, "--bind=ctrl-p:accept"}, tui.CtrlN, actNextHistory)
+	check([]string{hist, "--bind=ctrl-p:accept"}, tui.CtrlP, actAccept)
 }
 
 func optsFor(words ...string) *Options {
@@ -375,26 +381,37 @@ func TestPreviewOpts(t *testing.T) {
 	opts := optsFor()
 	if !(opts.Preview.command == "" &&
 		opts.Preview.hidden == false &&
+		opts.Preview.wrap == false &&
 		opts.Preview.position == posRight &&
 		opts.Preview.size.percent == true &&
 		opts.Preview.size.size == 50) {
 		t.Error()
 	}
-	opts = optsFor("--preview", "cat {}", "--preview-window=left:15:hidden")
+	opts = optsFor("--preview", "cat {}", "--preview-window=left:15:hidden:wrap")
 	if !(opts.Preview.command == "cat {}" &&
 		opts.Preview.hidden == true &&
+		opts.Preview.wrap == true &&
 		opts.Preview.position == posLeft &&
 		opts.Preview.size.percent == false &&
-		opts.Preview.size.size == 15+2) {
+		opts.Preview.size.size == 15+2+2) {
 		t.Error(opts.Preview)
 	}
-
-	opts = optsFor("--preview-window=left:15:hidden", "--preview-window=down")
+	opts = optsFor("--preview-window=up:15:wrap:hidden", "--preview-window=down")
 	if !(opts.Preview.command == "" &&
 		opts.Preview.hidden == false &&
+		opts.Preview.wrap == false &&
 		opts.Preview.position == posDown &&
 		opts.Preview.size.percent == true &&
 		opts.Preview.size.size == 50) {
+		t.Error(opts.Preview)
+	}
+	opts = optsFor("--preview-window=up:15:wrap:hidden")
+	if !(opts.Preview.command == "" &&
+		opts.Preview.hidden == true &&
+		opts.Preview.wrap == true &&
+		opts.Preview.position == posUp &&
+		opts.Preview.size.percent == false &&
+		opts.Preview.size.size == 15+2) {
 		t.Error(opts.Preview)
 	}
 }

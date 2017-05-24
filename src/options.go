@@ -9,7 +9,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/junegunn/fzf/src/algo"
-	"github.com/junegunn/fzf/src/curses"
+	"github.com/junegunn/fzf/src/tui"
+	"github.com/junegunn/fzf/src/util"
 
 	"github.com/junegunn/go-shellwords"
 )
@@ -23,6 +24,7 @@ const usage = `usage: fzf [options]
     --algo=TYPE           Fuzzy matching algorithm: [v1|v2] (default: v2)
     -i                    Case-insensitive match (default: smart-case match)
     +i                    Case-sensitive match
+    --literal             Do not normalize latin script letters before matching
     -n, --nth=N[,..]      Comma-separated list of field index expressions
                           for limiting search scope. Each can be a non-zero
                           integer or a range expression ([BEGIN]..[END]).
@@ -43,10 +45,16 @@ const usage = `usage: fzf [options]
     --no-hscroll          Disable horizontal scroll
     --hscroll-off=COL     Number of screen columns to keep to the right of the
                           highlighted substring (default: 10)
+    --filepath-word       Make word-wise movements respect path separators
     --jump-labels=CHARS   Label characters for jump and jump-accept
 
   Layout
+    --height=HEIGHT[%]    Display fzf window below the cursor with the given
+                          height instead of using fullscreen
+    --min-height=HEIGHT   Minimum height when --height is given in percent
+                          (default: 10)
     --reverse             Reverse orientation
+    --border              Draw border above and below the finder
     --margin=MARGIN       Screen margin (TRBL / TB,RL / T,RL,B / T,R,B,L)
     --inline-info         Display finder info inline with the query
     --prompt=STR          Input prompt (default: '> ')
@@ -57,6 +65,7 @@ const usage = `usage: fzf [options]
     --ansi                Enable processing of ANSI color codes
     --tabstop=SPACES      Number of spaces for a tab character (default: 8)
     --color=COLSPEC       Base scheme (dark|light|16|bw) and/or custom colors
+    --no-bold             Do not use bold text
 
   History
     --history=FILE        History file
@@ -65,7 +74,7 @@ const usage = `usage: fzf [options]
   Preview
     --preview=COMMAND     Command to preview highlighted line ({})
     --preview-window=OPT  Preview window layout (default: right:50%)
-                          [up|down|left|right][:SIZE[%]][:hidden]
+                          [up|down|left|right][:SIZE[%]][:wrap][:hidden]
 
   Scripting
     -q, --query=STR       Start the finder with the given query
@@ -74,7 +83,10 @@ const usage = `usage: fzf [options]
     -f, --filter=STR      Filter mode. Do not start interactive finder.
     --print-query         Print query as the first line
     --expect=KEYS         Comma-separated list of keys to complete fzf
+    --read0               Read input delimited by ASCII NUL characters
+    --print0              Print output delimited by ASCII NUL characters
     --sync                Synchronous search for multi-staged filtering
+    --version             Display version information and exit
 
   Environment variables
     FZF_DEFAULT_COMMAND   Default command to use when input is tty
@@ -125,6 +137,7 @@ type previewOpts struct {
 	position windowPosition
 	size     sizeSpec
 	hidden   bool
+	wrap     bool
 }
 
 // Options stores the values of command-line options
@@ -133,6 +146,7 @@ type Options struct {
 	FuzzyAlgo   algo.Algo
 	Extended    bool
 	Case        Case
+	Normalize   bool
 	Nth         []Range
 	WithNth     []Range
 	Delimiter   Delimiter
@@ -142,12 +156,16 @@ type Options struct {
 	Multi       bool
 	Ansi        bool
 	Mouse       bool
-	Theme       *curses.ColorTheme
+	Theme       *tui.ColorTheme
 	Black       bool
+	Bold        bool
+	Height      sizeSpec
+	MinHeight   int
 	Reverse     bool
 	Cycle       bool
 	Hscroll     bool
 	HscrollOff  int
+	FileWord    bool
 	InlineInfo  bool
 	JumpLabels  string
 	Prompt      string
@@ -157,8 +175,7 @@ type Options struct {
 	Filter      *string
 	ToggleSort  bool
 	Expect      map[int]string
-	Keymap      map[int]actionType
-	Execmap     map[int]string
+	Keymap      map[int][]action
 	Preview     previewOpts
 	PrintQuery  bool
 	ReadZero    bool
@@ -168,7 +185,9 @@ type Options struct {
 	Header      []string
 	HeaderLines int
 	Margin      [4]sizeSpec
+	Bordered    bool
 	Tabstop     int
+	ClearOnExit bool
 	Version     bool
 }
 
@@ -178,6 +197,7 @@ func defaultOptions() *Options {
 		FuzzyAlgo:   algo.FuzzyMatchV2,
 		Extended:    true,
 		Case:        CaseSmart,
+		Normalize:   true,
 		Nth:         make([]Range, 0),
 		WithNth:     make([]Range, 0),
 		Delimiter:   Delimiter{},
@@ -187,12 +207,15 @@ func defaultOptions() *Options {
 		Multi:       false,
 		Ansi:        false,
 		Mouse:       true,
-		Theme:       curses.EmptyTheme(),
+		Theme:       tui.EmptyTheme(),
 		Black:       false,
+		Bold:        true,
+		MinHeight:   10,
 		Reverse:     false,
 		Cycle:       false,
 		Hscroll:     true,
 		HscrollOff:  10,
+		FileWord:    false,
 		InlineInfo:  false,
 		JumpLabels:  defaultJumpLabels,
 		Prompt:      "> ",
@@ -202,9 +225,8 @@ func defaultOptions() *Options {
 		Filter:      nil,
 		ToggleSort:  false,
 		Expect:      make(map[int]string),
-		Keymap:      make(map[int]actionType),
-		Execmap:     make(map[int]string),
-		Preview:     previewOpts{"", posRight, sizeSpec{50, true}, false},
+		Keymap:      make(map[int][]action),
+		Preview:     previewOpts{"", posRight, sizeSpec{50, true}, false, false},
 		PrintQuery:  false,
 		ReadZero:    false,
 		Printer:     func(str string) { fmt.Println(str) },
@@ -214,6 +236,7 @@ func defaultOptions() *Options {
 		HeaderLines: 0,
 		Margin:      defaultMargin(),
 		Tabstop:     8,
+		ClearOnExit: true,
 		Version:     false}
 }
 
@@ -327,6 +350,10 @@ func isAlphabet(char uint8) bool {
 	return char >= 'a' && char <= 'z'
 }
 
+func isNumeric(char uint8) bool {
+	return char >= '0' && char <= '9'
+}
+
 func parseAlgo(str string) algo.Algo {
 	switch str {
 	case "v1":
@@ -358,60 +385,70 @@ func parseKeyChords(str string, message string) map[int]string {
 		chord := 0
 		switch lkey {
 		case "up":
-			chord = curses.Up
+			chord = tui.Up
 		case "down":
-			chord = curses.Down
+			chord = tui.Down
 		case "left":
-			chord = curses.Left
+			chord = tui.Left
 		case "right":
-			chord = curses.Right
+			chord = tui.Right
 		case "enter", "return":
-			chord = curses.CtrlM
+			chord = tui.CtrlM
 		case "space":
-			chord = curses.AltZ + int(' ')
+			chord = tui.AltZ + int(' ')
 		case "bspace", "bs":
-			chord = curses.BSpace
+			chord = tui.BSpace
+		case "ctrl-space":
+			chord = tui.CtrlSpace
 		case "alt-enter", "alt-return":
-			chord = curses.AltEnter
+			chord = tui.CtrlAltM
 		case "alt-space":
-			chord = curses.AltSpace
+			chord = tui.AltSpace
 		case "alt-/":
-			chord = curses.AltSlash
+			chord = tui.AltSlash
 		case "alt-bs", "alt-bspace":
-			chord = curses.AltBS
+			chord = tui.AltBS
 		case "tab":
-			chord = curses.Tab
+			chord = tui.Tab
 		case "btab", "shift-tab":
-			chord = curses.BTab
+			chord = tui.BTab
 		case "esc":
-			chord = curses.ESC
+			chord = tui.ESC
 		case "del":
-			chord = curses.Del
+			chord = tui.Del
 		case "home":
-			chord = curses.Home
+			chord = tui.Home
 		case "end":
-			chord = curses.End
+			chord = tui.End
 		case "pgup", "page-up":
-			chord = curses.PgUp
+			chord = tui.PgUp
 		case "pgdn", "page-down":
-			chord = curses.PgDn
+			chord = tui.PgDn
 		case "shift-left":
-			chord = curses.SLeft
+			chord = tui.SLeft
 		case "shift-right":
-			chord = curses.SRight
+			chord = tui.SRight
 		case "double-click":
-			chord = curses.DoubleClick
+			chord = tui.DoubleClick
 		case "f10":
-			chord = curses.F10
+			chord = tui.F10
+		case "f11":
+			chord = tui.F11
+		case "f12":
+			chord = tui.F12
 		default:
-			if len(key) == 6 && strings.HasPrefix(lkey, "ctrl-") && isAlphabet(lkey[5]) {
-				chord = curses.CtrlA + int(lkey[5]) - 'a'
+			if len(key) == 10 && strings.HasPrefix(lkey, "ctrl-alt-") && isAlphabet(lkey[9]) {
+				chord = tui.CtrlAltA + int(lkey[9]) - 'a'
+			} else if len(key) == 6 && strings.HasPrefix(lkey, "ctrl-") && isAlphabet(lkey[5]) {
+				chord = tui.CtrlA + int(lkey[5]) - 'a'
 			} else if len(key) == 5 && strings.HasPrefix(lkey, "alt-") && isAlphabet(lkey[4]) {
-				chord = curses.AltA + int(lkey[4]) - 'a'
+				chord = tui.AltA + int(lkey[4]) - 'a'
+			} else if len(key) == 5 && strings.HasPrefix(lkey, "alt-") && isNumeric(lkey[4]) {
+				chord = tui.Alt0 + int(lkey[4]) - '0'
 			} else if len(key) == 2 && strings.HasPrefix(lkey, "f") && key[1] >= '1' && key[1] <= '9' {
-				chord = curses.F1 + int(key[1]) - '1'
+				chord = tui.F1 + int(key[1]) - '1'
 			} else if utf8.RuneCountInString(key) == 1 {
-				chord = curses.AltZ + int([]rune(key)[0])
+				chord = tui.AltZ + int([]rune(key)[0])
 			} else {
 				errorExit("unsupported key: " + key)
 			}
@@ -458,7 +495,7 @@ func parseTiebreak(str string) []criterion {
 	return criteria
 }
 
-func dupeTheme(theme *curses.ColorTheme) *curses.ColorTheme {
+func dupeTheme(theme *tui.ColorTheme) *tui.ColorTheme {
 	if theme != nil {
 		dupe := *theme
 		return &dupe
@@ -466,16 +503,17 @@ func dupeTheme(theme *curses.ColorTheme) *curses.ColorTheme {
 	return nil
 }
 
-func parseTheme(defaultTheme *curses.ColorTheme, str string) *curses.ColorTheme {
+func parseTheme(defaultTheme *tui.ColorTheme, str string) *tui.ColorTheme {
 	theme := dupeTheme(defaultTheme)
+	rrggbb := regexp.MustCompile("^#[0-9a-fA-F]{6}$")
 	for _, str := range strings.Split(strings.ToLower(str), ",") {
 		switch str {
 		case "dark":
-			theme = dupeTheme(curses.Dark256)
+			theme = dupeTheme(tui.Dark256)
 		case "light":
-			theme = dupeTheme(curses.Light256)
+			theme = dupeTheme(tui.Light256)
 		case "16":
-			theme = dupeTheme(curses.Default16)
+			theme = dupeTheme(tui.Default16)
 		case "bw", "no":
 			theme = nil
 		default:
@@ -491,11 +529,17 @@ func parseTheme(defaultTheme *curses.ColorTheme, str string) *curses.ColorTheme 
 			if len(pair) != 2 {
 				fail()
 			}
-			ansi32, err := strconv.Atoi(pair[1])
-			if err != nil || ansi32 < -1 || ansi32 > 255 {
-				fail()
+
+			var ansi tui.Color
+			if rrggbb.MatchString(pair[1]) {
+				ansi = tui.HexToColor(pair[1])
+			} else {
+				ansi32, err := strconv.Atoi(pair[1])
+				if err != nil || ansi32 < -1 || ansi32 > 255 {
+					fail()
+				}
+				ansi = tui.Color(ansi32)
 			}
-			ansi := int16(ansi32)
 			switch pair[0] {
 			case "fg":
 				theme.Fg = ansi
@@ -543,23 +587,32 @@ func firstKey(keymap map[int]string) int {
 const (
 	escapedColon = 0
 	escapedComma = 1
+	escapedPlus  = 2
 )
 
-func parseKeymap(keymap map[int]actionType, execmap map[int]string, str string) {
-	if executeRegexp == nil {
-		// Backreferences are not supported.
-		// "~!@#$%^&*;/|".each_char.map { |c| Regexp.escape(c) }.map { |c| "#{c}[^#{c}]*#{c}" }.join('|')
-		executeRegexp = regexp.MustCompile(
-			"(?s):execute(-multi)?:.*|:execute(-multi)?(\\([^)]*\\)|\\[[^\\]]*\\]|~[^~]*~|![^!]*!|@[^@]*@|\\#[^\\#]*\\#|\\$[^\\$]*\\$|%[^%]*%|\\^[^\\^]*\\^|&[^&]*&|\\*[^\\*]*\\*|;[^;]*;|/[^/]*/|\\|[^\\|]*\\|)")
-	}
+func init() {
+	// Backreferences are not supported.
+	// "~!@#$%^&*;/|".each_char.map { |c| Regexp.escape(c) }.map { |c| "#{c}[^#{c}]*#{c}" }.join('|')
+	executeRegexp = regexp.MustCompile(
+		"(?si):(execute(?:-multi|-silent)?):.+|:(execute(?:-multi|-silent)?)(\\([^)]*\\)|\\[[^\\]]*\\]|~[^~]*~|![^!]*!|@[^@]*@|\\#[^\\#]*\\#|\\$[^\\$]*\\$|%[^%]*%|\\^[^\\^]*\\^|&[^&]*&|\\*[^\\*]*\\*|;[^;]*;|/[^/]*/|\\|[^\\|]*\\|)")
+}
+
+func parseKeymap(keymap map[int][]action, str string) {
 	masked := executeRegexp.ReplaceAllStringFunc(str, func(src string) string {
-		if strings.HasPrefix(src, ":execute-multi") {
-			return ":execute-multi(" + strings.Repeat(" ", len(src)-len(":execute-multi()")) + ")"
+		prefix := ":execute"
+		if src[len(prefix)] == '-' {
+			c := src[len(prefix)+1]
+			if c == 's' || c == 'S' {
+				prefix += "-silent"
+			} else {
+				prefix += "-multi"
+			}
 		}
-		return ":execute(" + strings.Repeat(" ", len(src)-len(":execute()")) + ")"
+		return prefix + "(" + strings.Repeat(" ", len(src)-len(prefix)-2) + ")"
 	})
 	masked = strings.Replace(masked, "::", string([]rune{escapedColon, ':'}), -1)
 	masked = strings.Replace(masked, ",:", string([]rune{escapedComma, ':'}), -1)
+	masked = strings.Replace(masked, "+:", string([]rune{escapedPlus, ':'}), -1)
 
 	idx := 0
 	for _, pairStr := range strings.Split(masked, ",") {
@@ -572,150 +625,179 @@ func parseKeymap(keymap map[int]actionType, execmap map[int]string, str string) 
 		}
 		var key int
 		if len(pair[0]) == 1 && pair[0][0] == escapedColon {
-			key = ':' + curses.AltZ
+			key = ':' + tui.AltZ
 		} else if len(pair[0]) == 1 && pair[0][0] == escapedComma {
-			key = ',' + curses.AltZ
+			key = ',' + tui.AltZ
+		} else if len(pair[0]) == 1 && pair[0][0] == escapedPlus {
+			key = '+' + tui.AltZ
 		} else {
 			keys := parseKeyChords(pair[0], "key name required")
 			key = firstKey(keys)
 		}
 
-		act := origPairStr[len(pair[0])+1 : len(origPairStr)]
-		actLower := strings.ToLower(act)
-		switch actLower {
-		case "ignore":
-			keymap[key] = actIgnore
-		case "beginning-of-line":
-			keymap[key] = actBeginningOfLine
-		case "abort":
-			keymap[key] = actAbort
-		case "accept":
-			keymap[key] = actAccept
-		case "print-query":
-			keymap[key] = actPrintQuery
-		case "backward-char":
-			keymap[key] = actBackwardChar
-		case "backward-delete-char":
-			keymap[key] = actBackwardDeleteChar
-		case "backward-word":
-			keymap[key] = actBackwardWord
-		case "clear-screen":
-			keymap[key] = actClearScreen
-		case "delete-char":
-			keymap[key] = actDeleteChar
-		case "delete-char/eof":
-			keymap[key] = actDeleteCharEOF
-		case "end-of-line":
-			keymap[key] = actEndOfLine
-		case "cancel":
-			keymap[key] = actCancel
-		case "forward-char":
-			keymap[key] = actForwardChar
-		case "forward-word":
-			keymap[key] = actForwardWord
-		case "jump":
-			keymap[key] = actJump
-		case "jump-accept":
-			keymap[key] = actJumpAccept
-		case "kill-line":
-			keymap[key] = actKillLine
-		case "kill-word":
-			keymap[key] = actKillWord
-		case "unix-line-discard", "line-discard":
-			keymap[key] = actUnixLineDiscard
-		case "unix-word-rubout", "word-rubout":
-			keymap[key] = actUnixWordRubout
-		case "yank":
-			keymap[key] = actYank
-		case "backward-kill-word":
-			keymap[key] = actBackwardKillWord
-		case "toggle-down":
-			keymap[key] = actToggleDown
-		case "toggle-up":
-			keymap[key] = actToggleUp
-		case "toggle-in":
-			keymap[key] = actToggleIn
-		case "toggle-out":
-			keymap[key] = actToggleOut
-		case "toggle-all":
-			keymap[key] = actToggleAll
-		case "select-all":
-			keymap[key] = actSelectAll
-		case "deselect-all":
-			keymap[key] = actDeselectAll
-		case "toggle":
-			keymap[key] = actToggle
-		case "down":
-			keymap[key] = actDown
-		case "up":
-			keymap[key] = actUp
-		case "page-up":
-			keymap[key] = actPageUp
-		case "page-down":
-			keymap[key] = actPageDown
-		case "previous-history":
-			keymap[key] = actPreviousHistory
-		case "next-history":
-			keymap[key] = actNextHistory
-		case "toggle-preview":
-			keymap[key] = actTogglePreview
-		case "toggle-sort":
-			keymap[key] = actToggleSort
-		case "preview-up":
-			keymap[key] = actPreviewUp
-		case "preview-down":
-			keymap[key] = actPreviewDown
-		case "preview-page-up":
-			keymap[key] = actPreviewPageUp
-		case "preview-page-down":
-			keymap[key] = actPreviewPageDown
-		default:
-			if isExecuteAction(actLower) {
-				var offset int
-				if strings.HasPrefix(actLower, "execute-multi") {
-					keymap[key] = actExecuteMulti
-					offset = len("execute-multi")
+		idx2 := len(pair[0]) + 1
+		specs := strings.Split(pair[1], "+")
+		actions := make([]action, 0, len(specs))
+		appendAction := func(types ...actionType) {
+			actions = append(actions, toActions(types...)...)
+		}
+		prevSpec := ""
+		for specIndex, maskedSpec := range specs {
+			spec := origPairStr[idx2 : idx2+len(maskedSpec)]
+			idx2 += len(maskedSpec) + 1
+			spec = prevSpec + spec
+			specLower := strings.ToLower(spec)
+			switch specLower {
+			case "ignore":
+				appendAction(actIgnore)
+			case "beginning-of-line":
+				appendAction(actBeginningOfLine)
+			case "abort":
+				appendAction(actAbort)
+			case "accept":
+				appendAction(actAccept)
+			case "print-query":
+				appendAction(actPrintQuery)
+			case "backward-char":
+				appendAction(actBackwardChar)
+			case "backward-delete-char":
+				appendAction(actBackwardDeleteChar)
+			case "backward-word":
+				appendAction(actBackwardWord)
+			case "clear-screen":
+				appendAction(actClearScreen)
+			case "delete-char":
+				appendAction(actDeleteChar)
+			case "delete-char/eof":
+				appendAction(actDeleteCharEOF)
+			case "end-of-line":
+				appendAction(actEndOfLine)
+			case "cancel":
+				appendAction(actCancel)
+			case "forward-char":
+				appendAction(actForwardChar)
+			case "forward-word":
+				appendAction(actForwardWord)
+			case "jump":
+				appendAction(actJump)
+			case "jump-accept":
+				appendAction(actJumpAccept)
+			case "kill-line":
+				appendAction(actKillLine)
+			case "kill-word":
+				appendAction(actKillWord)
+			case "unix-line-discard", "line-discard":
+				appendAction(actUnixLineDiscard)
+			case "unix-word-rubout", "word-rubout":
+				appendAction(actUnixWordRubout)
+			case "yank":
+				appendAction(actYank)
+			case "backward-kill-word":
+				appendAction(actBackwardKillWord)
+			case "toggle-down":
+				appendAction(actToggle, actDown)
+			case "toggle-up":
+				appendAction(actToggle, actUp)
+			case "toggle-in":
+				appendAction(actToggleIn)
+			case "toggle-out":
+				appendAction(actToggleOut)
+			case "toggle-all":
+				appendAction(actToggleAll)
+			case "select-all":
+				appendAction(actSelectAll)
+			case "deselect-all":
+				appendAction(actDeselectAll)
+			case "toggle":
+				appendAction(actToggle)
+			case "down":
+				appendAction(actDown)
+			case "up":
+				appendAction(actUp)
+			case "page-up":
+				appendAction(actPageUp)
+			case "page-down":
+				appendAction(actPageDown)
+			case "half-page-up":
+				appendAction(actHalfPageUp)
+			case "half-page-down":
+				appendAction(actHalfPageDown)
+			case "previous-history":
+				appendAction(actPreviousHistory)
+			case "next-history":
+				appendAction(actNextHistory)
+			case "toggle-preview":
+				appendAction(actTogglePreview)
+			case "toggle-preview-wrap":
+				appendAction(actTogglePreviewWrap)
+			case "toggle-sort":
+				appendAction(actToggleSort)
+			case "preview-up":
+				appendAction(actPreviewUp)
+			case "preview-down":
+				appendAction(actPreviewDown)
+			case "preview-page-up":
+				appendAction(actPreviewPageUp)
+			case "preview-page-down":
+				appendAction(actPreviewPageDown)
+			default:
+				t := isExecuteAction(specLower)
+				if t == actIgnore {
+					errorExit("unknown action: " + spec)
 				} else {
-					keymap[key] = actExecute
-					offset = len("execute")
+					var offset int
+					switch t {
+					case actExecuteSilent:
+						offset = len("execute-silent")
+					case actExecuteMulti:
+						offset = len("execute-multi")
+					default:
+						offset = len("execute")
+					}
+					if spec[offset] == ':' {
+						if specIndex == len(specs)-1 {
+							actions = append(actions, action{t: t, a: spec[offset+1:]})
+						} else {
+							prevSpec = spec + "+"
+							continue
+						}
+					} else {
+						actions = append(actions, action{t: t, a: spec[offset+1 : len(spec)-1]})
+					}
 				}
-				if act[offset] == ':' {
-					execmap[key] = act[offset+1:]
-				} else {
-					execmap[key] = act[offset+1 : len(act)-1]
-				}
-			} else {
-				errorExit("unknown action: " + act)
 			}
+			prevSpec = ""
 		}
+		keymap[key] = actions
 	}
 }
 
-func isExecuteAction(str string) bool {
-	if !strings.HasPrefix(str, "execute") || len(str) < len("execute()") {
-		return false
+func isExecuteAction(str string) actionType {
+	matches := executeRegexp.FindAllStringSubmatch(":"+str, -1)
+	if matches == nil || len(matches) != 1 {
+		return actIgnore
 	}
-	b := str[len("execute")]
-	if strings.HasPrefix(str, "execute-multi") {
-		if len(str) < len("execute-multi()") {
-			return false
-		}
-		b = str[len("execute-multi")]
+	prefix := matches[0][1]
+	if len(prefix) == 0 {
+		prefix = matches[0][2]
 	}
-	e := str[len(str)-1]
-	if b == ':' || b == '(' && e == ')' || b == '[' && e == ']' ||
-		b == e && strings.ContainsAny(string(b), "~!@#$%^&*;/|") {
-		return true
+	switch prefix {
+	case "execute":
+		return actExecute
+	case "execute-silent":
+		return actExecuteSilent
+	case "execute-multi":
+		return actExecuteMulti
 	}
-	return false
+	return actIgnore
 }
 
-func parseToggleSort(keymap map[int]actionType, str string) {
+func parseToggleSort(keymap map[int][]action, str string) {
 	keys := parseKeyChords(str, "key name required")
 	if len(keys) != 1 {
 		errorExit("multiple keys specified")
 	}
-	keymap[firstKey(keys)] = actToggleSort
+	keymap[firstKey(keys)] = toActions(actToggleSort)
 }
 
 func strLines(str string) []string {
@@ -746,40 +828,52 @@ func parseSize(str string, maxPercent float64, label string) sizeSpec {
 	return sizeSpec{val, percent}
 }
 
+func parseHeight(str string) sizeSpec {
+	if util.IsWindows() {
+		errorExit("--height options is currently not supported on Windows")
+	}
+	size := parseSize(str, 100, "height")
+	return size
+}
+
 func parsePreviewWindow(opts *previewOpts, input string) {
-	layout := input
+	// Default
+	opts.position = posRight
+	opts.size = sizeSpec{50, true}
 	opts.hidden = false
-	if strings.HasSuffix(layout, ":hidden") {
-		opts.hidden = true
-		layout = strings.TrimSuffix(layout, ":hidden")
-	}
+	opts.wrap = false
 
-	tokens := strings.Split(layout, ":")
-	if len(tokens) == 0 || len(tokens) > 2 {
-		errorExit("invalid window layout: " + input)
-	}
-
-	if len(tokens) > 1 {
-		opts.size = parseSize(tokens[1], 99, "window size")
-	} else {
-		opts.size = sizeSpec{50, true}
+	tokens := strings.Split(input, ":")
+	sizeRegex := regexp.MustCompile("^[0-9]+%?$")
+	for _, token := range tokens {
+		switch token {
+		case "hidden":
+			opts.hidden = true
+		case "wrap":
+			opts.wrap = true
+		case "up", "top":
+			opts.position = posUp
+		case "down", "bottom":
+			opts.position = posDown
+		case "left":
+			opts.position = posLeft
+		case "right":
+			opts.position = posRight
+		default:
+			if sizeRegex.MatchString(token) {
+				opts.size = parseSize(token, 99, "window size")
+			} else {
+				errorExit("invalid preview window layout: " + input)
+			}
+		}
 	}
 	if !opts.size.percent && opts.size.size > 0 {
 		// Adjust size for border
 		opts.size.size += 2
-	}
-
-	switch tokens[0] {
-	case "up":
-		opts.position = posUp
-	case "down":
-		opts.position = posDown
-	case "left":
-		opts.position = posLeft
-	case "right":
-		opts.position = posRight
-	default:
-		errorExit("invalid window position: " + input)
+		// And padding
+		if opts.position == posLeft || opts.position == posRight {
+			opts.size.size += 2
+		}
 	}
 }
 
@@ -857,6 +951,10 @@ func parseOptions(opts *Options, allArgs []string) {
 		case "-f", "--filter":
 			filter := nextString(allArgs, &i, "query string required")
 			opts.Filter = &filter
+		case "--literal":
+			opts.Normalize = false
+		case "--no-literal":
+			opts.Normalize = true
 		case "--algo":
 			opts.FuzzyAlgo = parseAlgo(nextString(allArgs, &i, "algorithm required (v1|v2)"))
 		case "--expect":
@@ -864,11 +962,11 @@ func parseOptions(opts *Options, allArgs []string) {
 		case "--tiebreak":
 			opts.Criteria = parseTiebreak(nextString(allArgs, &i, "sort criterion required"))
 		case "--bind":
-			parseKeymap(opts.Keymap, opts.Execmap, nextString(allArgs, &i, "bind expression required"))
+			parseKeymap(opts.Keymap, nextString(allArgs, &i, "bind expression required"))
 		case "--color":
 			spec := optionalNextString(allArgs, &i)
 			if len(spec) == 0 {
-				opts.Theme = curses.EmptyTheme()
+				opts.Theme = tui.EmptyTheme()
 			} else {
 				opts.Theme = parseTheme(opts.Theme, spec)
 			}
@@ -905,11 +1003,15 @@ func parseOptions(opts *Options, allArgs []string) {
 		case "+c", "--no-color":
 			opts.Theme = nil
 		case "+2", "--no-256":
-			opts.Theme = curses.Default16
+			opts.Theme = tui.Default16
 		case "--black":
 			opts.Black = true
 		case "--no-black":
 			opts.Black = false
+		case "--bold":
+			opts.Bold = true
+		case "--no-bold":
+			opts.Bold = false
 		case "--reverse":
 			opts.Reverse = true
 		case "--no-reverse":
@@ -924,6 +1026,10 @@ func parseOptions(opts *Options, allArgs []string) {
 			opts.Hscroll = false
 		case "--hscroll-off":
 			opts.HscrollOff = nextInt(allArgs, &i, "hscroll offset required")
+		case "--filepath-word":
+			opts.FileWord = true
+		case "--no-filepath-word":
+			opts.FileWord = false
 		case "--inline-info":
 			opts.InlineInfo = true
 		case "--no-inline-info":
@@ -980,14 +1086,28 @@ func parseOptions(opts *Options, allArgs []string) {
 			opts.Preview.command = ""
 		case "--preview-window":
 			parsePreviewWindow(&opts.Preview,
-				nextString(allArgs, &i, "preview window layout required: [up|down|left|right][:SIZE[%]]"))
+				nextString(allArgs, &i, "preview window layout required: [up|down|left|right][:SIZE[%]][:wrap][:hidden]"))
+		case "--height":
+			opts.Height = parseHeight(nextString(allArgs, &i, "height required: HEIGHT[%]"))
+		case "--min-height":
+			opts.MinHeight = nextInt(allArgs, &i, "height required: HEIGHT")
+		case "--no-height":
+			opts.Height = sizeSpec{}
 		case "--no-margin":
 			opts.Margin = defaultMargin()
+		case "--no-border":
+			opts.Bordered = false
+		case "--border":
+			opts.Bordered = true
 		case "--margin":
 			opts.Margin = parseMargin(
 				nextString(allArgs, &i, "margin required (TRBL / TB,RL / T,RL,B / T,R,B,L)"))
 		case "--tabstop":
 			opts.Tabstop = nextInt(allArgs, &i, "tab stop required")
+		case "--clear":
+			opts.ClearOnExit = true
+		case "--no-clear":
+			opts.ClearOnExit = false
 		case "--version":
 			opts.Version = true
 		default:
@@ -1007,6 +1127,10 @@ func parseOptions(opts *Options, allArgs []string) {
 				opts.WithNth = splitNth(value)
 			} else if match, _ := optString(arg, "-s", "--sort="); match {
 				opts.Sort = 1 // Don't care
+			} else if match, value := optString(arg, "--height="); match {
+				opts.Height = parseHeight(value)
+			} else if match, value := optString(arg, "--min-height="); match {
+				opts.MinHeight = atoi(value)
 			} else if match, value := optString(arg, "--toggle-sort="); match {
 				parseToggleSort(opts.Keymap, value)
 			} else if match, value := optString(arg, "--expect="); match {
@@ -1016,7 +1140,7 @@ func parseOptions(opts *Options, allArgs []string) {
 			} else if match, value := optString(arg, "--color="); match {
 				opts.Theme = parseTheme(opts.Theme, value)
 			} else if match, value := optString(arg, "--bind="); match {
-				parseKeymap(opts.Keymap, opts.Execmap, value)
+				parseKeymap(opts.Keymap, value)
 			} else if match, value := optString(arg, "--history="); match {
 				setHistory(value)
 			} else if match, value := optString(arg, "--history-size="); match {
@@ -1071,21 +1195,23 @@ func parseOptions(opts *Options, allArgs []string) {
 func postProcessOptions(opts *Options) {
 	// Default actions for CTRL-N / CTRL-P when --history is set
 	if opts.History != nil {
-		if _, prs := opts.Keymap[curses.CtrlP]; !prs {
-			opts.Keymap[curses.CtrlP] = actPreviousHistory
+		if _, prs := opts.Keymap[tui.CtrlP]; !prs {
+			opts.Keymap[tui.CtrlP] = toActions(actPreviousHistory)
 		}
-		if _, prs := opts.Keymap[curses.CtrlN]; !prs {
-			opts.Keymap[curses.CtrlN] = actNextHistory
+		if _, prs := opts.Keymap[tui.CtrlN]; !prs {
+			opts.Keymap[tui.CtrlN] = toActions(actNextHistory)
 		}
 	}
 
 	// Extend the default key map
 	keymap := defaultKeymap()
-	for key, act := range opts.Keymap {
-		if act == actToggleSort {
-			opts.ToggleSort = true
+	for key, actions := range opts.Keymap {
+		for _, act := range actions {
+			if act.t == actToggleSort {
+				opts.ToggleSort = true
+			}
 		}
-		keymap[key] = act
+		keymap[key] = actions
 	}
 	opts.Keymap = keymap
 

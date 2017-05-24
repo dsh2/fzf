@@ -1,6 +1,114 @@
 CHANGELOG
 =========
 
+0.16.7
+------
+- Added support for `ctrl-alt-[a-z]` key chords
+- CTRL-Z (SIGSTOP) now works with fzf
+- fzf will export `$FZF_PREVIEW_WINDOW` so that the scripts can use it
+- Bug fixes and improvements in Vim plugin and shell extensions
+
+0.16.6
+------
+- Minor bug fixes and improvements
+- Added `--no-clear` option for scripting purposes
+
+0.16.5
+------
+- Minor bug fixes
+- Added `toggle-preview-wrap` action
+- Built with Go 1.8
+
+0.16.4
+------
+- Added `--border` option to draw border above and below the finder
+- Bug fixes and improvements
+
+0.16.3
+------
+- Fixed a bug where fzf incorrectly display the lines when straddling tab
+  characters are trimmed
+- Placeholder expression used in `--preview` and `execute` action can
+  optionally take `+` flag to be used with multiple selections
+    - e.g. `git log --oneline | fzf --multi --preview 'git show {+1}'`
+- Added `execute-silent` action for executing a command silently without
+  switching to the alternate screen. This is useful when the process is
+  short-lived and you're not interested in its output.
+    - e.g. `fzf --bind 'ctrl-y:execute!(echo -n {} | pbcopy)'`
+- `ctrl-space` is allowed in `--bind`
+
+0.16.2
+------
+- Dropped ncurses dependency
+- Binaries for freebsd, openbsd, arm5, arm6, arm7, and arm8
+- Official 24-bit color support
+- Added support for composite actions in `--bind`. Multiple actions can be
+  chained using `+` separator.
+    - e.g. `fzf --bind 'ctrl-y:execute(echo -n {} | pbcopy)+abort'`
+- `--preview-window` with size 0 is allowed. This is used to make fzf execute
+  preview command in the background without displaying the result.
+- Minor bug fixes and improvements
+
+0.16.1
+------
+- Fixed `--height` option to properly fill the window with the background
+  color
+- Added `half-page-up` and `half-page-down` actions
+- Added `-L` flag to the default find command
+
+0.16.0
+------
+- *Added `--height HEIGHT[%]` option*
+    - fzf can now display finder without occupying the full screen
+- Preview window will truncate long lines by default. Line wrap can be enabled
+  by `:wrap` flag in `--preview-window`.
+- Latin script letters will be normalized before matching so that it's easier
+  to match against accented letters. e.g. `sodanco` can match `Só Danço Samba`.
+    - Normalization can be disabled via `--literal`
+- Added `--filepath-word` to make word-wise movements/actions (`alt-b`,
+  `alt-f`, `alt-bs`, `alt-d`) respect path separators
+
+0.15.9
+------
+- Fixed rendering glitches introduced in 0.15.8
+- The default escape delay is reduced to 50ms and is configurable via
+  `$ESCDELAY`
+- Scroll indicator at the top-right corner of the preview window is always
+  displayed when there's overflow
+- Can now be built with ncurses 6 or tcell to support extra features
+    - *ncurses 6*
+        - Supports more than 256 color pairs
+        - Supports italics
+    - *tcell*
+        - 24-bit color support
+    - See https://github.com/junegunn/fzf/blob/master/BUILD.md
+
+0.15.8
+------
+- Updated ANSI processor to handle more VT-100 escape sequences
+- Added `--no-bold` (and `--bold`) option
+- Improved escape sequence processing for WSL
+- Added support for `alt-[0-9]`, `f11`, and `f12` for `--bind` and `--expect`
+
+0.15.7
+------
+- Fixed panic when color is disabled and header lines contain ANSI colors
+
+0.15.6
+------
+- Windows binaries! (@kelleyma49)
+- Fixed the bug where header lines are cleared when preview window is toggled
+- Fixed not to display ^N and ^O on screen
+- Fixed cursor keys (or any key sequence that starts with ESC) on WSL by
+  making fzf wait for additional keystrokes after ESC for up to 100ms
+
+0.15.5
+------
+- Setting foreground color will no longer set background color to black
+    - e.g. `fzf --color fg:153`
+- `--tiebreak=end` will consider relative position instead of absolute distance
+- Updated `fzf#wrap` function to respect `g:fzf_colors`
+
 0.15.4
 ------
 - Added support for range expression in preview and execute action
