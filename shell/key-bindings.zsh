@@ -4,13 +4,14 @@ if [[ $- == *i* ]]; then
 
 # CTRL-T - Paste the selected file path(s) into the command line
 __fsel() {
-  local cmd="${FZF_CTRL_T_COMMAND:-"command find -L . -mindepth 1 \\( -path '*/\\.*' -o -fstype 'sysfs' -o -fstype 'devfs' -o -fstype 'devtmpfs' -o -fstype 'proc' \\) -prune \
-    -o -type f -print \
-    -o -type d -print \
-    -o -type l -print 2> /dev/null | sed 1d | cut -b3-"}"
+    # local cmd="${FZF_CTRL_T_COMMAND:-"command find -L . -mindepth 1 \\( -path '*/\\.*' -o -fstype 'sysfs' -o -fstype 'devfs' -o -fstype 'devtmpfs' -o -fstype 'proc' \\) -prune \
+  local cmd="${FZF_CTRL_T_COMMAND:-"command find -P . -mindepth 1  \
+    -printf '%y%m %n %TY-%Tm-%Td %TH:%TM %u:%g %p\n' 2> /dev/null" }"
   setopt localoptions pipefail 2> /dev/null
-  eval "$cmd" | $(__fzfcmd) -m | while read item; do
-  echo -n "${(q)item} "
+  # eval "$cmd" | $(__fzfcmd) +s --preview="file {}; ~/.config/ranger/scope.sh {}" -m | while read item; do
+  eval "$cmd" | $(__fzfcmd) +s --tac -m --preview-window=top:50% --preview="echo -n \"file: \"; file --brief --preserve-date --special-files --uncompress {6..}; strings {6..}" -m | while read item; do
+      local file=$(echo $item | cut -d ' ' -f 6-)
+      echo -n "${(q)file} "
   done
   echo
 }
@@ -52,7 +53,8 @@ bindkey '\ec' fzf-cd-widget
 fzf-history-widget() {
   local selected num
   setopt localoptions noglobsubst noposixbuiltins pipefail 2> /dev/null
-selected=( $(fc -liED 1 | $(__fzfcmd) +s --tac +m -n4..,.. --tiebreak=index --toggle-sort=ctrl-r ${=FZF_CTRL_R_OPTS} -q "${LBUFFER//$/\\$}") )
+  selected=( $(fc -liED 1 | $(__fzfcmd) +s --tac +m -n4..,.. --tiebreak=index --toggle-sort=ctrl-r ${=FZF_CTRL_R_OPTS} -q "${LBUFFER//$/\\$}") )
+  # selected=( $(fc -liED 1 | $(__fzfcmd) +s --tac +m -n4.. --tiebreak=index --toggle-sort=ctrl-r ${=FZF_CTRL_R_OPTS} -q "${LBUFFER//$/\\$}") )
   local ret=$?
   if [ -n "$selected" ]; then
     num=$selected[1]
