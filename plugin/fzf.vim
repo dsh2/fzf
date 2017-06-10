@@ -45,18 +45,38 @@ if s:is_win
     endtry
   endfunction
 
-  function! s:fzf_shellescape(path)
-    return substitute(s:fzf_call('shellescape', a:path), '[^\\]\zs\\"$', '\\\\"', '')
+  " Use utf-8 for fzf.vim commands
+  " Return array of shell commands for cmd.exe
+  function! s:wrap_cmds(cmds)
+    return ['@echo off', 'for /f "tokens=4" %%a in (''chcp'') do set origchcp=%%a', 'chcp 65001 > nul'] +
+          \ (type(a:cmds) == type([]) ? a:cmds : [a:cmds]) +
+          \ ['chcp %origchcp% > nul']
   endfunction
 else
   function! s:fzf_call(fn, ...)
     return call(a:fn, a:000)
   endfunction
 
-  function! s:fzf_shellescape(path)
-    return shellescape(a:path)
+  function! s:wrap_cmds(cmds)
+    return a:cmds
   endfunction
 endif
+
+function! s:shellesc_cmd(arg)
+  let escaped = substitute(a:arg, '[&|<>()@^]', '^&', 'g')
+  let escaped = substitute(escaped, '%', '%%', 'g')
+  let escaped = substitute(escaped, '"', '\\^&', 'g')
+  let escaped = substitute(escaped, '\\\+\(\\^\)', '\\\\\1', 'g')
+  return '^"'.substitute(escaped, '[^\\]\zs\\$', '\\\\', '').'^"'
+endfunction
+
+function! fzf#shellescape(arg, ...)
+  let shell = get(a:000, 0, &shell)
+  if shell =~# 'cmd.exe$'
+    return s:shellesc_cmd(a:arg)
+  endif
+  return s:fzf_call('shellescape', a:arg)
+endfunction
 
 function! s:fzf_getcwd()
   return s:fzf_call('getcwd')
@@ -90,7 +110,7 @@ function! s:fzf_exec()
       let s:exec = s:fzf_go
     elseif executable('fzf')
       let s:exec = 'fzf'
-    elseif s:is_win
+    elseif s:is_win && !has('win32unix')
       call s:warn('fzf executable not found.')
       call s:warn('Download fzf binary for Windows from https://github.com/junegunn/fzf-bin/releases/')
       call s:warn('and place it as '.s:base_dir.'\bin\fzf.exe')
@@ -108,7 +128,7 @@ function! s:fzf_exec()
       throw 'fzf executable not found'
     endif
   endif
-  return s:is_win ? s:exec : s:shellesc(s:exec)
+  return fzf#shellescape(s:exec)
 endfunction
 
 function! s:tmux_enabled()
@@ -126,10 +146,6 @@ function! s:tmux_enabled()
     let s:tmux = !v:shell_error && output >= 'tmux 1.7'
   endif
   return s:tmux
-endfunction
-
-function! s:shellesc(arg)
-  return '"'.substitute(a:arg, '"', '\\"', 'g').'"'
 endfunction
 
 function! s:escape(path)
@@ -250,7 +266,7 @@ endfunction
 
 function! s:evaluate_opts(options)
   return type(a:options) == type([]) ?
-        \ join(map(copy(a:options), 's:fzf_shellescape(v:val)')) : a:options
+        \ join(map(copy(a:options), 'fzf#shellescape(v:val)')) : a:options
 endfunction
 
 " [name string,] [opts dict,] [fullscreen boolean]
@@ -297,7 +313,7 @@ function! fzf#wrap(...)
     if !isdirectory(dir)
       call mkdir(dir, 'p')
     endif
-    let history = s:is_win ? s:fzf_shellescape(dir.'\'.name) : s:escape(dir.'/'.name)
+    let history = fzf#shellescape(dir.'/'.name)
     let opts.options = join(['--history', history, opts.options])
   endif
 
@@ -345,11 +361,14 @@ try
   if has('nvim') && !has_key(dict, 'dir')
     let dict.dir = s:fzf_getcwd()
   endif
+  if has('win32unix') && has_key(dict, 'dir')
+    let dict.dir = fnamemodify(dict.dir, ':p')
+  endif
 
   if !has_key(dict, 'source') && !empty($FZF_DEFAULT_COMMAND)
     let temps.source = s:fzf_tempname().(s:is_win ? '.bat' : '')
-    call writefile((s:is_win ? ['@echo off'] : []) + split($FZF_DEFAULT_COMMAND, "\n"), temps.source)
-    let dict.source = (empty($SHELL) ? &shell : $SHELL) . (s:is_win ? ' /c ' : ' ') . s:shellesc(temps.source)
+    call writefile(s:wrap_cmds(split($FZF_DEFAULT_COMMAND, "\n")), temps.source)
+    let dict.source = (empty($SHELL) ? &shell : $SHELL) . (s:is_win ? ' /c ' : ' ') . fzf#shellescape(temps.source)
   endif
 
   if has_key(dict, 'source')
@@ -360,7 +379,7 @@ try
     elseif type == 3
       let temps.input = s:fzf_tempname()
       call writefile(source, temps.input)
-      let prefix = (s:is_win ? 'type ' : 'cat ').s:shellesc(temps.input).'|'
+      let prefix = (s:is_win ? 'type ' : 'cat ').fzf#shellescape(temps.input).'|'
     else
       throw 'Invalid source type'
     endif
@@ -370,10 +389,10 @@ try
 
   let prefer_tmux = get(g:, 'fzf_prefer_tmux', 0)
   let use_height = has_key(dict, 'down') &&
-        \ !(has('nvim') || s:is_win || s:present(dict, 'up', 'left', 'right')) &&
+        \ !(has('nvim') || s:is_win || has('win32unix') || s:present(dict, 'up', 'left', 'right')) &&
         \ executable('tput') && filereadable('/dev/tty')
   let use_term = has('nvim') && !s:is_win
-  let use_tmux = (!use_height && !use_term || prefer_tmux) && s:tmux_enabled() && s:splittable(dict)
+  let use_tmux = (!use_height && !use_term || prefer_tmux) && !has('win32unix') && s:tmux_enabled() && s:splittable(dict)
   if prefer_tmux && use_tmux
     let use_height = 0
     let use_term = 0
@@ -424,7 +443,7 @@ function! s:fzf_tmux(dict)
     endif
   endfor
   return printf('LINES=%d COLUMNS=%d %s %s %s --',
-    \ &lines, &columns, s:shellesc(s:fzf_tmux), size, (has_key(a:dict, 'source') ? '' : '-'))
+    \ &lines, &columns, fzf#shellescape(s:fzf_tmux), size, (has_key(a:dict, 'source') ? '' : '-'))
 endfunction
 
 function! s:splittable(dict)
@@ -469,7 +488,7 @@ function! s:xterm_launcher()
     \ &columns, &lines/2, getwinposx(), getwinposy())
 endfunction
 unlet! s:launcher
-if s:is_win
+if s:is_win || has('win32unix')
   let s:launcher = '%s'
 else
   let s:launcher = function('s:xterm_launcher')
@@ -493,7 +512,7 @@ function! s:execute(dict, command, use_height, temps) abort
   if has('unix') && !a:use_height
     silent! !clear 2> /dev/null
   endif
-  let escaped = escape(substitute(a:command, '\n', '\\n', 'g'), '%#!')
+  let escaped = (a:use_height || s:is_win) ? a:command : escape(substitute(a:command, '\n', '\\n', 'g'), '%#!')
   if has('gui_running')
     let Launcher = get(a:dict, 'launcher', get(g:, 'Fzf_launcher', get(g:, 'fzf_launcher', s:launcher)))
     let fmt = type(Launcher) == 2 ? call(Launcher, []) : Launcher
@@ -502,12 +521,13 @@ function! s:execute(dict, command, use_height, temps) abort
     endif
     let command = printf(fmt, escaped)
   else
-    let command = a:use_height ? a:command : escaped
+    let command = escaped
   endif
   if s:is_win
     let batchfile = s:fzf_tempname().'.bat'
-    call writefile(['@echo off', command], batchfile)
+    call writefile(s:wrap_cmds(command), batchfile)
     let command = batchfile
+    let a:temps.batchfile = batchfile
     if has('nvim')
       let s:dict = a:dict
       let s:temps = a:temps
@@ -520,6 +540,11 @@ function! s:execute(dict, command, use_height, temps) abort
       call jobstart(cmd, fzf)
       return []
     endif
+  elseif has('win32unix') && $TERM !=# 'cygwin'
+    let shellscript = s:fzf_tempname()
+    call writefile([command], shellscript)
+    let command = 'cmd.exe /C '.fzf#shellescape('set "TERM=" & start /WAIT sh -c '.shellscript)
+    let a:temps.shellscript = shellscript
   endif
   if a:use_height
     let stdin = has_key(a:dict, 'source') ? '' : '< /dev/tty'
@@ -536,7 +561,7 @@ function! s:execute_tmux(dict, command, temps) abort
   let command = a:command
   if s:pushd(a:dict)
     " -c '#{pane_current_path}' is only available on tmux 1.9 or above
-    let command = 'cd '.s:escape(a:dict.dir).' && '.command
+    let command = join(['cd', fzf#shellescape(a:dict.dir), '&&', command])
   endif
 
   call system(command)
