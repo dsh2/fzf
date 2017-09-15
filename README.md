@@ -3,15 +3,19 @@
 
 fzf is a general-purpose command-line fuzzy finder.
 
-![](https://raw.github.com/junegunn/i/master/fzf.gif)
+<img src="https://raw.githubusercontent.com/junegunn/i/master/fzf-preview.png" width=640>
+
+It's an interactive Unix filter for command-line that can be used with any
+list; files, command history, processes, hostnames, bookmarks, git commits,
+etc.
 
 Pros
 ----
 
-- No dependencies
+- Portable, no dependencies
 - Blazingly fast
 - The most comprehensive feature set
-- Flexible layout using tmux panes
+- Flexible layout
 - Batteries included
     - Vim/Neovim plugin, key bindings and fuzzy auto-completion
 
@@ -20,7 +24,7 @@ Table of Contents
 
    * [Installation](#installation)
       * [Using git](#using-git)
-      * [Using Homebrew](#using-homebrew)
+      * [Using Homebrew or Linuxbrew](#using-homebrew-or-linuxbrew)
       * [As Vim plugin](#as-vim-plugin)
       * [Windows](#windows)
    * [Upgrading fzf](#upgrading-fzf)
@@ -42,6 +46,10 @@ Table of Contents
       * [Settings](#settings)
       * [Supported commands](#supported-commands)
    * [Vim plugin](#vim-plugin)
+   * [Advanced topics](#advanced-topics)
+      * [Performance](#performance)
+      * [Executing external programs](#executing-external-programs)
+      * [Preview window](#preview-window)
    * [Tips](#tips)
       * [Respecting .gitignore, <code>.hgignore</code>, and <code>svn:ignore</code>](#respecting-gitignore-hgignore-and-svnignore)
       * [git ls-tree for fast traversal](#git-ls-tree-for-fast-traversal)
@@ -75,9 +83,10 @@ git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
 ~/.fzf/install
 ```
 
-### Using Homebrew
+### Using Homebrew or Linuxbrew
 
-On OS X, you can use [Homebrew](http://brew.sh/) to install fzf.
+Alternatively, you can use [Homebrew](http://brew.sh/) or
+[Linuxbrew](http://linuxbrew.sh/) to install fzf.
 
 ```sh
 brew install fzf
@@ -383,13 +392,94 @@ Vim plugin
 
 See [README-VIM.md](README-VIM.md).
 
+Advanced topics
+---------------
+
+### Performance
+
+fzf is fast, and is [getting even faster][perf]. Performance should not be
+a problem in most use cases. However, you might want to be aware of the
+options that affect the performance.
+
+- `--ansi` tells fzf to extract and parse ANSI color codes in the input and it
+  makes the initial scanning slower. So it's not recommended that you add it
+  to your `$FZF_DEFAULT_OPTS`.
+- `--nth` makes fzf slower as fzf has to tokenize each line.
+- `--with-nth` makes fzf slower as fzf has to tokenize and reassemble each
+  line.
+- If you absolutely need better performance, you can consider using
+  `--algo=v1` (the default being `v2`) to make fzf use faster greedy
+  algorithm. However, this algorithm is not guaranteed to find the optimal
+  ordering of the matches and is not recommended.
+
+[perf]: https://junegunn.kr/images/fzf-0.17.0.png
+
+### Executing external programs
+
+You can set up key bindings for starting external processes without leaving
+fzf (`execute`, `execute-silent`).
+
+```bash
+# Press F1 to open the file with less without leaving fzf
+# Press CTRL-Y to copy the line to clipboard and aborts fzf (requires pbcopy)
+fzf --bind 'f1:execute(less -f {}),ctrl-y:execute-silent(echo {} | pbcopy)+abort'
+```
+
+See *KEY BINDINGS* section of the man page for details.
+
+### Preview window
+
+When `--preview` option is set, fzf automatically starts external process with
+the current line as the argument and shows the result in the split window.
+
+```bash
+# {} is replaced to the single-quoted string of the focused line
+fzf --preview 'cat {}'
+```
+
+Since preview window is updated only after the process is complete, it's
+important that the command finishes quickly.
+
+```bash
+# Use head instead of cat so that the command doesn't take too long to finish
+fzf --preview 'head -100 {}'
+```
+
+Preview window supports ANSI colors, so you can use programs that
+syntax-highlights the content of a file.
+
+- Highlight: http://www.andre-simon.de/doku/highlight/en/highlight.php
+- CodeRay: http://coderay.rubychan.de/
+- Rouge: https://github.com/jneen/rouge
+
+```bash
+# Try highlight, coderay, rougify in turn, then fall back to cat
+fzf --preview '[[ $(file --mime {}) =~ binary ]] &&
+                 echo {} is a binary file ||
+                 (highlight -O ansi -l {} ||
+                  coderay {} ||
+                  rougify {} ||
+                  cat {}) 2> /dev/null | head -500'
+```
+
+You can customize the size and position of the preview window using
+`--preview-window` option. For example,
+
+```bash
+fzf --height 40% --reverse --preview 'file {}' --preview-window down:1
+```
+
+For more advanced examples, see [Key bindings for git with fzf][fzf-git].
+
+[fzf-git]: https://junegunn.kr/2016/07/fzf-git/
+
 Tips
 ----
 
 #### Respecting `.gitignore`, `.hgignore`, and `svn:ignore`
 
 [ag](https://github.com/ggreer/the_silver_searcher) or
-[pt](https://github.com/monochromegane/the_platinum_searcher) will do the
+[rg](https://github.com/BurntSushi/ripgrep) will do the
 filtering:
 
 ```sh
@@ -426,10 +516,10 @@ export FZF_DEFAULT_COMMAND='
 
 #### Fish shell
 
-It's [a known bug of fish](https://github.com/fish-shell/fish-shell/issues/1362)
-(will be fixed in 2.6.0) that it doesn't allow reading from STDIN in command
-substitution, which means simple `vim (fzf)` won't work as expected. The
-workaround is to use the `read` fish command:
+Fish shell before version 2.6.0 [doesn't allow](https://github.com/fish-shell/fish-shell/issues/1362)
+reading from STDIN in command substitution, which means simple `vim (fzf)`
+doesn't work as expected. The workaround for fish 2.5.0 and earlier is to use
+the `read` fish command:
 
 ```sh
 fzf | read -l result; and vim $result
@@ -457,7 +547,7 @@ make use of this feature. `$dir` defaults to `.` when the last token is not a
 valid directory. Example:
 
 ```sh
-set -l FZF_CTRL_T_COMMAND "command find -L \$dir -type f 2> /dev/null | sed '1d; s#^\./##'"
+set -g FZF_CTRL_T_COMMAND "command find -L \$dir -type f 2> /dev/null | sed '1d; s#^\./##'"
 ```
 
 [License](LICENSE)

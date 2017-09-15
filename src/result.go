@@ -19,22 +19,17 @@ type colorOffset struct {
 	index  int32
 }
 
-type rank struct {
-	points [4]uint16
-	index  int32
-}
-
 type Result struct {
-	item *Item
-	rank rank
+	item   *Item
+	points [4]uint16
 }
 
-func buildResult(item *Item, offsets []Offset, score int) *Result {
+func buildResult(item *Item, offsets []Offset, score int) Result {
 	if len(offsets) > 1 {
 		sort.Sort(ByOrder(offsets))
 	}
 
-	result := Result{item: item, rank: rank{index: item.index}}
+	result := Result{item: item}
 	numChars := item.text.Length()
 	minBegin := math.MaxUint16
 	minEnd := math.MaxUint16
@@ -57,7 +52,7 @@ func buildResult(item *Item, offsets []Offset, score int) *Result {
 			// Higher is better
 			val = math.MaxUint16 - util.AsUint16(score)
 		case byLength:
-			val = util.AsUint16(int(item.TrimLength()))
+			val = item.TrimLength()
 		case byBegin, byEnd:
 			if validOffsetFound {
 				whitePrefixLen := 0
@@ -75,10 +70,10 @@ func buildResult(item *Item, offsets []Offset, score int) *Result {
 				}
 			}
 		}
-		result.rank.points[idx] = val
+		result.points[3-idx] = val
 	}
 
-	return &result
+	return result
 }
 
 // Sort criteria to use. Never changes once fzf is started.
@@ -86,11 +81,11 @@ var sortCriteria []criterion
 
 // Index returns ordinal index of the Item
 func (result *Result) Index() int32 {
-	return result.item.index
+	return result.item.Index()
 }
 
-func minRank() rank {
-	return rank{index: 0, points: [4]uint16{math.MaxUint16, 0, 0, 0}}
+func minRank() Result {
+	return Result{item: &minItem, points: [4]uint16{math.MaxUint16, 0, 0, 0}}
 }
 
 func (result *Result) colorOffsets(matchOffsets []Offset, theme *tui.ColorTheme, color tui.ColorPair, attr tui.Attr, current bool) []colorOffset {
@@ -201,7 +196,7 @@ func (a ByOrder) Less(i, j int) bool {
 }
 
 // ByRelevance is for sorting Items
-type ByRelevance []*Result
+type ByRelevance []Result
 
 func (a ByRelevance) Len() int {
 	return len(a)
@@ -212,11 +207,11 @@ func (a ByRelevance) Swap(i, j int) {
 }
 
 func (a ByRelevance) Less(i, j int) bool {
-	return compareRanks((*a[i]).rank, (*a[j]).rank, false)
+	return compareRanks(a[i], a[j], false)
 }
 
 // ByRelevanceTac is for sorting Items
-type ByRelevanceTac []*Result
+type ByRelevanceTac []Result
 
 func (a ByRelevanceTac) Len() int {
 	return len(a)
@@ -227,18 +222,5 @@ func (a ByRelevanceTac) Swap(i, j int) {
 }
 
 func (a ByRelevanceTac) Less(i, j int) bool {
-	return compareRanks((*a[i]).rank, (*a[j]).rank, true)
-}
-
-func compareRanks(irank rank, jrank rank, tac bool) bool {
-	for idx := 0; idx < 4; idx++ {
-		left := irank.points[idx]
-		right := jrank.points[idx]
-		if left < right {
-			return true
-		} else if left > right {
-			return false
-		}
-	}
-	return (irank.index <= jrank.index) != tac
+	return compareRanks(a[i], a[j], true)
 }

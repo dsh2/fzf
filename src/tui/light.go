@@ -32,7 +32,8 @@ var offsetRegexp *regexp.Regexp = regexp.MustCompile("\x1b\\[([0-9]+);([0-9]+)R"
 func openTtyIn() *os.File {
 	in, err := os.OpenFile(consoleDevice, syscall.O_RDONLY, 0)
 	if err != nil {
-		panic("Failed to open " + consoleDevice)
+		fmt.Fprintln(os.Stderr, "Failed to open "+consoleDevice)
+		os.Exit(2)
 	}
 	return in
 }
@@ -104,6 +105,7 @@ type LightWindow struct {
 	posx     int
 	posy     int
 	tabstop  int
+	fg       Color
 	bg       Color
 }
 
@@ -182,10 +184,18 @@ func (r *LightRenderer) Init() {
 	if r.fullscreen {
 		r.smcup()
 	} else {
-		r.csi("J")
+		// We assume that --no-clear is used for repetitive relaunching of fzf.
+		// So we do not clear the lower bottom of the screen.
+		if r.clearOnExit {
+			r.csi("J")
+		}
 		y, x := r.findOffset()
 		r.mouse = r.mouse && y >= 0
-		if x > 0 {
+		// When --no-clear is used for repetitive relaunching, there is a small
+		// time frame between fzf processes where the user keystrokes are not
+		// captured by either of fzf process which can cause x offset to be
+		// increased and we're left with unwanted extra new line.
+		if x > 0 && r.clearOnExit {
 			r.upOneLine = true
 			r.makeSpace()
 		}
@@ -200,7 +210,9 @@ func (r *LightRenderer) Init() {
 	r.csi(fmt.Sprintf("%dA", r.MaxY()-1))
 	r.csi("G")
 	r.csi("K")
-	// r.csi("s")
+	if !r.clearOnExit && !r.fullscreen {
+		r.csi("s")
+	}
 	if !r.fullscreen && r.mouse {
 		r.yoffset, _ = r.findOffset()
 	}
@@ -411,10 +423,12 @@ func (r *LightRenderer) escSequence(sz *int) Event {
 						return Event{F12, 0, nil}
 					}
 				}
-				// Bracketed paste mode \e[200~ / \e[201
-				if r.buffer[3] == 48 && (r.buffer[4] == 48 || r.buffer[4] == 49) && r.buffer[5] == 126 {
-					*sz = 6
-					return Event{Invalid, 0, nil}
+				// Bracketed paste mode: \e[200~ ... \e[201~
+				if r.buffer[3] == '0' && (r.buffer[4] == '0' || r.buffer[4] == '1') && r.buffer[5] == '~' {
+					// Immediately discard the sequence from the buffer and reread input
+					r.buffer = r.buffer[6:]
+					*sz = 0
+					return r.GetChar()
 				}
 				return Event{Invalid, 0, nil} // INS
 			case 51:
@@ -584,10 +598,8 @@ func (r *LightRenderer) Close() {
 			}
 			r.csi("J")
 		}
-	} else if r.fullscreen {
-		r.csi("G")
-	} else {
-		r.move(r.height, 0)
+	} else if !r.fullscreen {
+		r.csi("u")
 	}
 	if r.mouse {
 		r.csi("?1000l")
@@ -608,10 +620,6 @@ func (r *LightRenderer) DoesAutoWrap() bool {
 	return false
 }
 
-func (r *LightRenderer) IsOptimized() bool {
-	return false
-}
-
 func (r *LightRenderer) NewWindow(top int, left int, width int, height int, borderStyle BorderStyle) Window {
 	w := &LightWindow{
 		renderer: r,
@@ -622,8 +630,10 @@ func (r *LightRenderer) NewWindow(top int, left int, width int, height int, bord
 		width:    width,
 		height:   height,
 		tabstop:  r.tabstop,
+		fg:       colDefault,
 		bg:       colDefault}
 	if r.theme != nil {
+		w.fg = r.theme.Fg
 		w.bg = r.theme.Bg
 	}
 	w.drawBorder()
@@ -695,6 +705,10 @@ func (w *LightWindow) Close() {
 
 func (w *LightWindow) X() int {
 	return w.posx
+}
+
+func (w *LightWindow) Y() int {
+	return w.posy
 }
 
 func (w *LightWindow) Enclose(y int, x int) bool {
@@ -831,17 +845,20 @@ func (w *LightWindow) fill(str string, onMove func()) FillReturn {
 		for j, wl := range lines {
 			if w.posx >= w.Width()-1 && wl.displayWidth == 0 {
 				if w.posy < w.height-1 {
-					w.MoveAndClear(w.posy+1, 0)
+					w.Move(w.posy+1, 0)
 				}
 				return FillNextLine
 			}
 			w.stderrInternal(wl.text, false)
 			w.posx += wl.displayWidth
+
+			// Wrap line
 			if j < len(lines)-1 || i < len(allLines)-1 {
 				if w.posy+1 >= w.height {
 					return FillSuspend
 				}
-				w.MoveAndClear(w.posy+1, 0)
+				w.MoveAndClear(w.posy, w.posx)
+				w.Move(w.posy+1, 0)
 				onMove()
 			}
 		}
@@ -856,24 +873,28 @@ func (w *LightWindow) setBg() {
 }
 
 func (w *LightWindow) Fill(text string) FillReturn {
-	w.MoveAndClear(w.posy, w.posx)
+	w.Move(w.posy, w.posx)
 	w.setBg()
 	return w.fill(text, w.setBg)
 }
 
 func (w *LightWindow) CFill(fg Color, bg Color, attr Attr, text string) FillReturn {
-	w.MoveAndClear(w.posy, w.posx)
+	w.Move(w.posy, w.posx)
+	if fg == colDefault {
+		fg = w.fg
+	}
 	if bg == colDefault {
 		bg = w.bg
 	}
 	if w.csiColor(fg, bg, attr) {
-		return w.fill(text, func() { w.csiColor(fg, bg, attr) })
 		defer w.csi("m")
+		return w.fill(text, func() { w.csiColor(fg, bg, attr) })
 	}
 	return w.fill(text, w.setBg)
 }
 
 func (w *LightWindow) FinishFill() {
+	w.MoveAndClear(w.posy, w.posx)
 	for y := w.posy + 1; y < w.height; y++ {
 		w.MoveAndClear(y, 0)
 	}
