@@ -4,16 +4,28 @@ if [[ $- == *i* ]]; then
 
 # CTRL-T - Paste the selected file path(s) into the command line
 __fsel() {
-    # local cmd="${FZF_CTRL_T_COMMAND:-"command find -L . -mindepth 1 \\( -path '*/\\.*' -o -fstype 'sysfs' -o -fstype 'devfs' -o -fstype 'devtmpfs' -o -fstype 'proc' \\) -prune \
-	  local cmd="${FZF_CTRL_T_COMMAND:-"command find -P . -mindepth 1  \
-			-printf '%y%m %n %TY-%Tm-%Td %TH:%TM %u:%g %kk %p\n' 2> /dev/null" }"
-	  setopt localoptions pipefail 2> /dev/null
-	  # eval "$cmd" | $(__fzfcmd) +s --preview="file {}; ~/.config/ranger/scope.sh {}" -m | while read item; do
-	  eval "$cmd" | $(__fzfcmd) +s --tac -m --preview-window=top:50% --preview="echo -n \"file: \"; file --brief --preserve-date --special-files --uncompress {7..}; strings {7..}" -m | while read item; do
-		  local file=$(echo $item | cut -d ' ' -f 7-)
-		  echo -n "${(q)file} "
-	  done
-  echo
+    setopt localoptions pipefail 
+    REPORTTIME=-1
+    command find \
+		-P . \
+		-mindepth 1  \
+		-printf '%y%m\t%n\t%TY-%Tm-%Td\t%TH:%TM\t%u:%g\t%kk\t%p\n' |
+	 $(__fzfcmd) \
+	     --sort \
+	     --multi \
+	     --preview-window=top:50% \
+	     --preview="
+		    echo -n \"file: \"; 
+		    file --brief \
+			    --preserve-date \
+			    --special-files \
+			    --uncompress {7..}; \
+		    strings -f {7..}" | 
+    while read item; do
+	local file=$(echo $item | cut -f 7-)
+	echo -n "${(q)file} "
+    done
+    echo
 }
 
 __fzf_use_tmux__() {
