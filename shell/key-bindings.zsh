@@ -70,28 +70,38 @@ bindkey '\ec' fzf-cd-widget
 # CTRL-R - Paste the selected command from history into the command line
 fzf-history-widget() {
     setopt localoptions noglobsubst noposixbuiltins pipefail 
-    local selected num
-    selected=( $(fc -rlEDt '%a %F  %T' 1 |
+    local -r mode_switch_key=ctrl-space
+    local query="${LBUFFER//$/\\$}"
+    local -a modes=(global local internal)
+    local mode=$modes[1]
+    # TODO: check if the following is zsh idiomtic. 
+    local -T RESULT result $'\n'
+    RESULT=$(fc -rlEDt '%a %F  %T' 1 |
 		$(__fzfcmd) \
 		--no-sort \
 		--preview "
 		    echo {6..} | pygmentize -l zsh;
 		    tmux-log.sh {1}" \
 		--preview-window up:5:wrap \
+		--multi
 		--tiebreak=begin,index  \
-		--toggle-sort=ctrl-r  \
-		${=FZF_CTRL_R_OPTS} \
-		-q "${LBUFFER//$/\\$}"
+		--print-query \
+		--expect=$mode_switch_key \
+		--prompt="zsh history ($mode): " \
+		--query=$query \
 		)
-	    )
-    local ret=$?
-    if [ -n "$selected" ]; then
-	num=$selected[1]
-	if [ -n "$num" ]; then
-	    zle vi-fetch-history -n $num
+    query=$result[1]
+    local key=$result[2]
+    local selection=$result[3,-1]
+    local -p > /dev/stderr
+    if [ -z $key ]; then
+	if [ -n $selection[1] ]; then
+	    zle vi-fetch-history -n $selection[1]
 	fi
+    else
+	# TODO: iterate over modes and re-run fzf
     fi
-    zle redisplay
+    # zle redisplay
 }
 zle     -N   fzf-history-widget
 bindkey '^R' fzf-history-widget
