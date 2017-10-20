@@ -81,38 +81,62 @@ bindkey '\ec' fzf-cd-widget
 
 # CTRL-R - Paste the selected command from history into the command line
 # TODO: allow --multi and add binding to vimdiff the outputs
+
 fzf-history-widget() {
-    setopt localoptions noglobsubst noposixbuiltins pipefail 
-    local selected num
-    local time_format='%a %F %T (%s)' 
-    local ABORTED="ABORTED"
-    selected=( $(([[ -n $ZLE_LINE_ABORTED ]] && echo -e $ABORTED\\t$(date +$time_format)\  ABRT\  $ZLE_LINE_ABORTED; fc -rlEDt $time_format 1) |
-		$(__fzfcmd) \
-		--no-sort \
-		--preview "
-		    echo COMMAND: {7..} | pygmentize -l zsh;
-		    # echo EVENT ID: {3..4}; 
-		    tmux-log.sh {1}" \
-		--preview-window up:45%:wrap \
-		--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
-		--tiebreak=begin,index  \
-		--toggle-sort=ctrl-r  \
-		${=FZF_CTRL_R_OPTS} \
-		-q "${LBUFFER//$/\\$}"
-		)
-	    )
-    local ret=$?
-    if [ -n "$selected" ]; then
-	num=$selected[1]
-	if [ $num = $ABORTED ]; then
-	    zle kill-whole-line
-	    zle -U "$ZLE_LINE_ABORTED"
-	elif [ -n "$num" ]; then
-	    zle vi-fetch-history -n $num
-	fi
-    fi
-    zle redisplay
-    return $ret
+	setopt localoptions noglobsubst noposixbuiltins pipefail
+	local -r time_format='%a %F %T (%s)' 
+	local -r ABORTED="ABORTED"
+	local -r mode_switch_key=ctrl-space
+	# selected=( $(([[ -n $ZLE_LINE_ABORTED ]] && echo -e $ABORTED\\t$(date +$time_format)\  ABRT\  $ZLE_LINE_ABORTED; fc -rlEDt $time_format 1) |
+	local query="${LBUFFER//$/\\$}"
+	local -a modes=("global" "local" "internal")
+	local fzf_prompt="zsh history"
+	local -i mode_index=1
+	local mode_param=""
+	while true; do 
+		# TODO: use special word splitting instead of tie?
+		local -T RESULT result $'\n'
+		RESULT=$(fc ${=mode_fd_param} -rlEDt '%a %F  %T' 1 |
+			$(__fzfcmd) \
+			--no-sort \
+			--preview "
+				echo COMMAND: {7..} | pygmentize -l zsh;
+				# echo EVENT ID: {3..4};
+				tmux-log.sh {1}" \
+			--preview-window up:45%:wrap \
+			--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
+			--tiebreak=begin,index  \
+			--print-query \
+			--expect=$mode_switch_key \
+			--query=$query \
+			--prompt="$modes[$mode_index] $fzf_prompt: " 
+			) || { (( ? == 130 )) && return ; }
+
+		# if [ $num = $ABORTED ]; then
+			# zle kill-whole-line
+			# zle -U "$ZLE_LINE_ABORTED"
+		# elif [ -n "$num" ]; then
+			# zle vi-fetch-history -n $num
+		query=$result[1]
+		local key=$result[2]
+		local selection=$result[3]
+		if [ -z $key ]; then
+			if [ -n $selection[1] ]; then
+				zle vi-fetch-history -n ${selection[(w)1]}
+				zle redisplay
+				return $ret
+			else
+				print "When does this happen?"
+				sleep 5
+			fi
+		fi
+		mode_index=$((mode_index % $#modes + 1))
+		case "$modes[$mode_index]" in
+			"global") mode_fd_param=""; fc -P ;;
+			"local") mode_fd_param=""; fc -ap $(zloc_file) ;;
+			"internal") mode_fd_param="-I" ;;
+		esac
+	done 
 }
 zle     -N   fzf-history-widget
 bindkey '^R' fzf-history-widget
