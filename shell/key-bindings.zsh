@@ -70,7 +70,7 @@ bindkey '\ec' fzf-cd-widget
 # CTRL-R - Paste the selected command from history into the command line
 fzf-history-widget() {
     setopt localoptions noglobsubst noposixbuiltins pipefail 
-    local -r mode_switch_key=ctrl-space
+    local -r mode_switch_key="ctrl-space"
     local query="${LBUFFER//$/\\$}"
     local -a modes=(global local internal)
     local mode=$modes[1]
@@ -80,28 +80,33 @@ fzf-history-widget() {
 		$(__fzfcmd) \
 		--no-sort \
 		--preview "
-		    echo {6..} | pygmentize -l zsh;
-		    tmux-log.sh {1}" \
+		    echo COMMAND: {6..} | pygmentize -l zsh;
+		    tmux-log.sh --show {1}" \
 		--preview-window up:5:wrap \
-		--multi
+		--multi \
 		--tiebreak=begin,index  \
 		--print-query \
 		--expect=$mode_switch_key \
+		--bind "ctrl-v:execute(tmux split -h vim ~/.tmux-log/{1} +AnsiEsc)" \
 		--prompt="zsh history ($mode): " \
 		--query=$query \
-		)
+		) || return
     query=$result[1]
     local key=$result[2]
-    local selection=$result[3,-1]
-    local -p > /dev/stderr
+    local -a selection; selection=($result[3,-1])
+    # TODO: Remember num and store it somewhere in maybe tmux-log in order to 
+    # keep not only a linear history but also a history tree
+    # typeset -p result num selection result > /dev/stderr
     if [ -z $key ]; then
 	if [ -n $selection[1] ]; then
-	    zle vi-fetch-history -n $selection[1]
+	    local num=$selection[1][1]
+	    zle vi-fetch-history -n $num
+	    # TODO: Add expect-key for direct execution
 	fi
     else
 	# TODO: iterate over modes and re-run fzf
     fi
-    # zle redisplay
+    zle redisplay
 }
 zle     -N   fzf-history-widget
 bindkey '^R' fzf-history-widget
