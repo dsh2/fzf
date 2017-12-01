@@ -9,8 +9,7 @@ __fsel() {
     REPORTTIME=-1
     FIND_PRINTF='%y%m\t%n\t%TY-%Tm-%Td\t%TH:%TM\t%u:%g\t%kk\t%p\n'
     FIND_COLUMNS=${(ws:\t:)#FIND_PRINTF}
-    command find \
-		-P . \
+    command find -P ${(%)LBUFFER[(w)-1]:r} \
 		-mindepth 1  \
 		-printf $FIND_PRINTF |
 	 $(__fzfcmd) \
@@ -44,7 +43,7 @@ __fzfcmd() {
 }
 
 fzf-file-widget() {
-  LBUFFER="${LBUFFER}$(__fsel)"
+LBUFFER="${LBUFFER[(w)0,(w)-2]} $(__fsel)"
   zle redisplay
 }
 zle     -N   fzf-file-widget
@@ -78,6 +77,7 @@ fzf-history-widget() {
 		    echo {6..} | pygmentize -l zsh;
 		    tmux-log.sh {1}" \
 		--preview-window up:5:wrap \
+		--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
 		--tiebreak=begin,index  \
 		--toggle-sort=ctrl-r  \
 		${=FZF_CTRL_R_OPTS} \
