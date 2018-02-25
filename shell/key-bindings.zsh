@@ -74,9 +74,9 @@ fzf-history-widget() {
 		$(__fzfcmd) \
 		--no-sort \
 		--preview "
-		    echo {6..} | pygmentize -l zsh;
+		    echo COMMAND: {6..} | pygmentize -l zsh;
 		    tmux-log.sh {1}" \
-		--preview-window up:5:wrap \
+		--preview-window up:45%:wrap \
 		--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
 		--tiebreak=begin,index  \
 		--toggle-sort=ctrl-r  \
