@@ -3,7 +3,7 @@
 if [[ $- == *i* ]]; then
 
 # CTRL-T - Paste the selected file path(s) into the command line
-# TODO: Use a more advanced preview than strings
+# TODO: Use a more advanced preview than strings (ranger scope?)
 __fsel() {
     setopt localoptions pipefail 
     REPORTTIME=-1
@@ -67,6 +67,7 @@ zle     -N    fzf-cd-widget
 bindkey '\ec' fzf-cd-widget
 
 # CTRL-R - Paste the selected command from history into the command line
+# TODO: allow --multi and add binding to vimdiff the outputs
 fzf-history-widget() {
     setopt localoptions noglobsubst noposixbuiltins pipefail 
     local selected num
