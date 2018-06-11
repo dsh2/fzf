@@ -70,11 +70,14 @@ bindkey '\ec' fzf-cd-widget
 fzf-history-widget() {
     setopt localoptions noglobsubst noposixbuiltins pipefail 
     local selected num
-    selected=( $(fc -rlEDt '%a %F  %T' 1 |
+    local time_format='%a %F %T (%s)' 
+    local ABORTED="ABORTED"
+    selected=( $(([[ -n $ZLE_LINE_ABORTED ]] && echo -e $ABORTED\\t$(date +$time_format)\  ABRT\  $ZLE_LINE_ABORTED; fc -rlEDt $time_format 1) |
 		$(__fzfcmd) \
 		--no-sort \
 		--preview "
-		    echo COMMAND: {6..} | pygmentize -l zsh;
+		    echo COMMAND: {7..} | pygmentize -l zsh;
+		    # echo EVENT ID: {3..4}; 
 		    tmux-log.sh {1}" \
 		--preview-window up:45%:wrap \
 		--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
@@ -87,7 +90,10 @@ fzf-history-widget() {
     local ret=$?
     if [ -n "$selected" ]; then
 	num=$selected[1]
-	if [ -n "$num" ]; then
+	if [ $num = $ABORTED ]; then
+	    zle kill-whole-line
+	    zle -U "$ZLE_LINE_ABORTED"
+	elif [ -n "$num" ]; then
 	    zle vi-fetch-history -n $num
 	fi
     fi
