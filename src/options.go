@@ -53,7 +53,7 @@ const usage = `usage: fzf [options]
                           height instead of using fullscreen
     --min-height=HEIGHT   Minimum height when --height is given in percent
                           (default: 10)
-    --reverse             Reverse orientation
+    --layout=LAYOUT       Choose layout: [default|reverse|reverse-list]
     --border              Draw border above and below the finder
     --margin=MARGIN       Screen margin (TRBL / TB,RL / T,RL,B / T,R,B,L)
     --inline-info         Display finder info inline with the query
@@ -90,7 +90,8 @@ const usage = `usage: fzf [options]
 
   Environment variables
     FZF_DEFAULT_COMMAND   Default command to use when input is tty
-    FZF_DEFAULT_OPTS      Default options (e.g. '--reverse --inline-info')
+    FZF_DEFAULT_OPTS      Default options
+                          (e.g. '--layout=reverse --inline-info')
 
 `
 
@@ -132,6 +133,14 @@ const (
 	posRight
 )
 
+type layoutType int
+
+const (
+	layoutDefault layoutType = iota
+	layoutReverse
+	layoutReverseList
+)
+
 type previewOpts struct {
 	command  string
 	position windowPosition
@@ -161,7 +170,7 @@ type Options struct {
 	Bold        bool
 	Height      sizeSpec
 	MinHeight   int
-	Reverse     bool
+	Layout      layoutType
 	Cycle       bool
 	Hscroll     bool
 	HscrollOff  int
@@ -211,7 +220,7 @@ func defaultOptions() *Options {
 		Black:       false,
 		Bold:        true,
 		MinHeight:   10,
-		Reverse:     false,
+		Layout:      layoutDefault,
 		Cycle:       false,
 		Hscroll:     true,
 		HscrollOff:  10,
@@ -410,6 +419,14 @@ func parseKeyChords(str string, message string) map[int]string {
 			chord = tui.AltSlash
 		case "alt-bs", "alt-bspace":
 			chord = tui.AltBS
+		case "alt-up":
+			chord = tui.AltUp
+		case "alt-down":
+			chord = tui.AltDown
+		case "alt-left":
+			chord = tui.AltLeft
+		case "alt-right":
+			chord = tui.AltRight
 		case "tab":
 			chord = tui.Tab
 		case "btab", "shift-tab":
@@ -426,10 +443,18 @@ func parseKeyChords(str string, message string) map[int]string {
 			chord = tui.PgUp
 		case "pgdn", "page-down":
 			chord = tui.PgDn
+		case "shift-up":
+			chord = tui.SUp
+		case "shift-down":
+			chord = tui.SDown
 		case "shift-left":
 			chord = tui.SLeft
 		case "shift-right":
 			chord = tui.SRight
+		case "left-click":
+			chord = tui.LeftClick
+		case "right-click":
+			chord = tui.RightClick
 		case "double-click":
 			chord = tui.DoubleClick
 		case "f10":
@@ -658,8 +683,12 @@ func parseKeymap(keymap map[int][]action, str string) {
 				appendAction(actAbort)
 			case "accept":
 				appendAction(actAccept)
+			case "accept-non-empty":
+				appendAction(actAcceptNonEmpty)
 			case "print-query":
 				appendAction(actPrintQuery)
+			case "replace-query":
+				appendAction(actReplaceQuery)
 			case "backward-char":
 				appendAction(actBackwardChar)
 			case "backward-delete-char":
@@ -835,6 +864,20 @@ func parseSize(str string, maxPercent float64, label string) sizeSpec {
 func parseHeight(str string) sizeSpec {
 	size := parseSize(str, 100, "height")
 	return size
+}
+
+func parseLayout(str string) layoutType {
+	switch str {
+	case "default":
+		return layoutDefault
+	case "reverse":
+		return layoutReverse
+	case "reverse-list":
+		return layoutReverseList
+	default:
+		errorExit("invalid layout (expected: default / reverse / reverse-list)")
+	}
+	return layoutDefault
 }
 
 func parsePreviewWindow(opts *previewOpts, input string) {
@@ -1017,10 +1060,13 @@ func parseOptions(opts *Options, allArgs []string) {
 			opts.Bold = true
 		case "--no-bold":
 			opts.Bold = false
+		case "--layout":
+			opts.Layout = parseLayout(
+				nextString(allArgs, &i, "layout required (default / reverse / reverse-list)"))
 		case "--reverse":
-			opts.Reverse = true
+			opts.Layout = layoutReverse
 		case "--no-reverse":
-			opts.Reverse = false
+			opts.Layout = layoutDefault
 		case "--cycle":
 			opts.Cycle = true
 		case "--no-cycle":
@@ -1136,6 +1182,8 @@ func parseOptions(opts *Options, allArgs []string) {
 				opts.Height = parseHeight(value)
 			} else if match, value := optString(arg, "--min-height="); match {
 				opts.MinHeight = atoi(value)
+			} else if match, value := optString(arg, "--layout="); match {
+				opts.Layout = parseLayout(value)
 			} else if match, value := optString(arg, "--toggle-sort="); match {
 				parseToggleSort(opts.Keymap, value)
 			} else if match, value := optString(arg, "--expect="); match {

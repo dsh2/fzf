@@ -44,10 +44,22 @@ __fzfcmd() {
 
 fzf-file-widget() {
 LBUFFER="${LBUFFER[(w)0,(w)-2]} $(__fsel)"
-  zle redisplay
+  local ret=$?
+  zle reset-prompt
+  return $ret
 }
 zle     -N   fzf-file-widget
 bindkey '^T' fzf-file-widget
+
+# Ensure precmds are run after cd
+fzf-redraw-prompt() {
+  local precmd
+  for precmd in $precmd_functions; do
+    $precmd
+  done
+  zle reset-prompt
+}
+zle -N fzf-redraw-prompt
 
 # ALT-C - cd into the selected directory
 fzf-cd-widget() {
@@ -61,7 +73,8 @@ fzf-cd-widget() {
   fi
   cd "$dir"
   local ret=$?
-  zle reset-prompt
+  zle fzf-redraw-prompt
+  return $ret
 }
 zle     -N    fzf-cd-widget
 bindkey '\ec' fzf-cd-widget
@@ -99,6 +112,7 @@ fzf-history-widget() {
 	fi
     fi
     zle redisplay
+    return $ret
 }
 zle     -N   fzf-history-widget
 bindkey '^R' fzf-history-widget
