@@ -81,8 +81,12 @@ bindkey '\ec' fzf-cd-widget
 
 # CTRL-R - Paste the selected command from history into the command line
 # TODO: allow --multi and add binding to vimdiff the outputs
-
 fzf-history-widget() {
+
+# local -i t=4
+# while (( t -= 1 ));  do print $i; fc -Il ; sleep 1 ;  done
+# return
+
 	setopt localoptions noglobsubst noposixbuiltins pipefail
 	local -r time_format='%a %F %T (%s)' 
 	local -r ABORTED="ABORTED"
@@ -90,14 +94,16 @@ fzf-history-widget() {
 	# selected=( $(([[ -n $ZLE_LINE_ABORTED ]] && echo -e $ABORTED\\t$(date +$time_format)\  ABRT\  $ZLE_LINE_ABORTED; fc -rlEDt $time_format 1) |
 	local query="${LBUFFER//$/\\$}"
 	local -a modes=("global" "local" "internal")
-	local fzf_prompt="zsh history"
+	# TODO: make mode persistent across invocation of widget
+	# : ${mode_index:=1}
 	local -i mode_index=1
-	local mode_param=""
-	while true; do 
-		# TODO: use special word splitting instead of tie?
-		local -T RESULT result $'\n'
-		RESULT=$(fc ${=mode_fd_param} -rlEDt '%a %F  %T' 1 |
-			$(__fzfcmd) \
+	local fzf_prompt="zsh history"
+	local mode_fd_param=""
+	local -a fzf_result
+	while true; do
+		fzf_result=("${(f)$(fc $=mode_fd_param -rlEDt '%a %F  %T' 1 |
+			# $(__fzfcmd) \
+			fzf \
 			--no-sort \
 			--preview "
 				echo COMMAND: {7..} | pygmentize -l zsh;
@@ -107,36 +113,51 @@ fzf-history-widget() {
 			--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
 			--tiebreak=begin,index  \
 			--print-query \
-			--expect=$mode_switch_key \
+			--expect=ctrl-m,$mode_switch_key \
 			--query=$query \
-			--prompt="$modes[$mode_index] $fzf_prompt: " 
-			) || { (( ? == 130 )) && return ; }
+			--prompt="$modes[$mode_index] $fzf_prompt: "
+		)}") || return
 
 		# if [ $num = $ABORTED ]; then
 			# zle kill-whole-line
 			# zle -U "$ZLE_LINE_ABORTED"
 		# elif [ -n "$num" ]; then
 			# zle vi-fetch-history -n $num
-		query=$result[1]
-		local key=$result[2]
-		local selection=$result[3]
-		if [ -z $key ]; then
-			if [ -n $selection[1] ]; then
-				zle vi-fetch-history -n ${selection[(w)1]}
+		query=$fzf_result[1]
+		local key=$fzf_result[2]
+		local selection=$fzf_result[3]
+		case "$key" in
+			"ctrl-m")
+				local event_id=$selection[(w)1]
+				(( event_id )) && zle vi-fetch-history -n $event_id
+				# zle redisplay
+				return
+				;;
+			"$mode_switch_key")
+				mode_index=$((mode_index % $#modes + 1))
+				case "$modes[$mode_index]" in
+					"global") 
+						mode_fd_param=""
+						fc -P 
+						;;
+					"local") 
+						mode_fd_param=""
+						fc -ap $(zloc_file)
+						;;
+					"internal") 
+						mode_fd_param="-I"
+						fc -P 
+						;;
+					*)
+						print "Illegal mode encountered"; sleep 5
+				esac
+				;;
+			*)
 				zle redisplay
-				return $ret
-			else
-				print "When does this happen?"
-				sleep 5
-			fi
-		fi
-		mode_index=$((mode_index % $#modes + 1))
-		case "$modes[$mode_index]" in
-			"global") mode_fd_param=""; fc -P ;;
-			"local") mode_fd_param=""; fc -ap $(zloc_file) ;;
-			"internal") mode_fd_param="-I" ;;
+				zle -M "fzf returned empty key."
+				return
 		esac
-	done 
+	done
 }
 zle     -N   fzf-history-widget
 bindkey '^R' fzf-history-widget
