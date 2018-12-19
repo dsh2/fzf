@@ -82,11 +82,6 @@ bindkey '\ec' fzf-cd-widget
 # CTRL-R - Paste the selected command from history into the command line
 # TODO: allow --multi and add binding to vimdiff the outputs
 fzf-history-widget() {
-
-# local -i t=4
-# while (( t -= 1 ));  do print $i; fc -Il ; sleep 1 ;  done
-# return
-
 	setopt localoptions noglobsubst noposixbuiltins pipefail
 	local -r time_format='%a %F %T (%s)' 
 	local -r ABORTED="ABORTED"
@@ -130,7 +125,6 @@ fzf-history-widget() {
 			"ctrl-m")
 				local event_id=$selection[(w)1]
 				(( event_id )) && zle vi-fetch-history -n $event_id
-				# zle redisplay
 				return
 				;;
 			"$mode_switch_key")
