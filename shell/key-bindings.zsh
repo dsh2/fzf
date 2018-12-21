@@ -90,7 +90,8 @@ fzf-history-widget() {
 	# TODO: rename local to path-local
 	# TODO: add local mode in the sense of zsh terminology
 	# TODO: add path-local-recursive
-	local -a modes=("global" "local" "internal")
+	local -a modes
+	modes=("global" "local" "internal")
 	# TODO: make mode persistent across invocation of widget
 	# : ${mode_index:=1}
 	local -i mode_index=1
