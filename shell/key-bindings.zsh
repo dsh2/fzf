@@ -82,7 +82,7 @@ bindkey '\ec' fzf-cd-widget
 # CTRL-R - Paste the selected command from history into the command line
 # TODO: allow --multi and add binding to vimdiff the outputs
 fzf-history-widget() {
-	setopt localoptions noglobsubst noposixbuiltins nopipefail
+	setopt localoptions noglobsubst noposixbuiltins 
 	local query="${LBUFFER//$/\\$}"
 	local -r time_format='%a %F %T' 
 	local -r aborted_id="ABRT"
