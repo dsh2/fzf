@@ -134,7 +134,7 @@ fzf-history-widget() {
 				elif (( event_id )) then
 					zle vi-fetch-history -n $event_id
 				else
-					zle -M "fc returned illegal event id."
+					zle -M "fc returned illegal event id (\"$key\")."
 				fi
 				return
 				;;
