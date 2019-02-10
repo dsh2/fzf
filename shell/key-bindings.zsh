@@ -82,37 +82,88 @@ bindkey '\ec' fzf-cd-widget
 # CTRL-R - Paste the selected command from history into the command line
 # TODO: allow --multi and add binding to vimdiff the outputs
 fzf-history-widget() {
-    setopt localoptions noglobsubst noposixbuiltins pipefail 
-    local selected num
-    local time_format='%a %F %T (%s)' 
-    local ABORTED="ABORTED"
-    selected=( $(([[ -n $ZLE_LINE_ABORTED ]] && echo -e $ABORTED\\t$(date +$time_format)\  ABRT\  $ZLE_LINE_ABORTED; fc -rlEDt $time_format 1) |
-		$(__fzfcmd) \
-		--no-sort \
-		--preview "
-		    echo COMMAND: {7..} | pygmentize -l zsh;
-		    # echo EVENT ID: {3..4}; 
-		    tmux-log.sh {1}" \
-		--preview-window up:45%:wrap \
-		--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
-		--tiebreak=begin,index  \
-		--toggle-sort=ctrl-r  \
-		${=FZF_CTRL_R_OPTS} \
-		-q "${LBUFFER//$/\\$}"
-		)
-	    )
-    local ret=$?
-    if [ -n "$selected" ]; then
-	num=$selected[1]
-	if [ $num = $ABORTED ]; then
-	    zle kill-whole-line
-	    zle -U "$ZLE_LINE_ABORTED"
-	elif [ -n "$num" ]; then
-	    zle vi-fetch-history -n $num
-	fi
-    fi
-    zle redisplay
-    return $ret
+	setopt localoptions noglobsubst noposixbuiltins 
+	local query="${LBUFFER//$/\\$}"
+	local -r time_format='%a %F %T' 
+	local -r aborted_id="ABRT"
+	local -r mode_switch_key=ctrl-space
+	# TODO: rename local to path-local
+	# TODO: add local mode in the sense of zsh terminology
+	# TODO: add path-local-recursive
+	local -a modes
+	modes=("global" "local" "internal")
+	# TODO: make mode persistent across invocation of widget
+	# : ${mode_index:=1}
+	local -i mode_index=1
+	local fzf_prompt="zsh history"
+	local mode_fd_param=""
+	local -a fzf_result
+	while :; do
+		fzf_result=("${(f)$(
+			( 
+			# TODO: Add support for nested abortion
+				[[ -n $ZLE_LINE_ABORTED ]] && 
+					echo -e $aborted_id\\t$(date +$time_format)\ $ZLE_LINE_ABORTED ;
+				fc $=mode_fd_param -rlEDt '%a %F  %T' 1 2> /dev/null
+			) |
+			# TODO: re-enable tmux support
+			# $(__fzfcmd) \
+			fzf \
+			--no-sort \
+			--preview "
+				echo COMMAND: {7..} | pygmentize -l zsh;
+				# echo EVENT ID: {3..4};
+				tmux-log.sh {1}" \
+			--preview-window up:45%:wrap \
+			--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
+			--tiebreak=begin,index  \
+			--print-query \
+			--expect=ctrl-m,$mode_switch_key \
+			--query=$query \
+			--prompt="$modes[$mode_index] $fzf_prompt: "
+		)}") 
+
+		query=$fzf_result[1]
+		local key=$fzf_result[2]
+		local selection=$fzf_result[3]
+		case "$key" in
+			"ctrl-m")
+				local event_id=$selection[(w)1]
+				if [[ $event_id == $aborted_id ]]; then
+					zle kill-whole-line
+					zle -U "$ZLE_LINE_ABORTED"
+				elif (( event_id )) then
+					zle vi-fetch-history -n $event_id
+				else
+					zle -M "fc returned illegal event id (\"$key\")."
+				fi
+				return
+				;;
+			"$mode_switch_key")
+				mode_index=$((mode_index % $#modes + 1))
+				case "$modes[$mode_index]" in
+					"global") 
+						mode_fd_param=""
+						fc -P 
+						;;
+					"local") 
+						mode_fd_param=""
+						fc -ap $(zloc_file)
+						;;
+					"internal") 
+						mode_fd_param="-I"
+						fc -P 
+						;;
+					*)
+						print "Illegal mode encountered"; sleep 5
+				esac
+				;;
+			*)
+				# zle redisplay
+				# zle -M "fzf returned empty key."
+				return
+		esac
+	done
 }
 zle     -N   fzf-history-widget
 bindkey '^R' fzf-history-widget
