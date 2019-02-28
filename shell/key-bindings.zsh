@@ -13,8 +13,6 @@ __fsel() {
 		-mindepth 1  \
 		-printf $FIND_PRINTF |
 	 $(__fzfcmd) \
-	     --bind "ctrl-r:execute(tmux split -h ranger {$FIND_COLUMNS..})" \
-	     --bind "ctrl-v:execute(tmux split -h vim {$FIND_COLUMNS..})" \
 	     --sort \
 	     --multi \
 	     --tabstop=6 \
