@@ -9,9 +9,13 @@ __fsel() {
     REPORTTIME=-1
     FIND_PRINTF='%y%m\t%n\t%TY-%Tm-%Td\t%TH:%TM\t%u:%g\t%kk\t%p\n'
     FIND_COLUMNS=${(ws:\t:)#FIND_PRINTF}
-    command find -P ${(%)LBUFFER[(w)-1]:r} \
+	local dir=${LBUFFER[(w)-1]}
+	# local dir="~/.pcap"
+	[[ -d $dir ]] || dir=
+    command find -P $dir \
 		-mindepth 1  \
-		-printf $FIND_PRINTF |
+		-printf $FIND_PRINTF \
+		2> /dev/null |
 	 $(__fzfcmd) \
 	     --sort \
 	     --multi \
@@ -26,9 +30,8 @@ __fsel() {
 		    strings {$FIND_COLUMNS..}" |
     while read item; do
 	local file=$(echo $item | cut -f 7-)
-	echo -n "${(q)file} "
+		echo -n "${(q)file} "
     done
-    echo
 }
 
 __fzf_use_tmux__() {
@@ -41,10 +44,10 @@ __fzfcmd() {
 }
 
 fzf-file-widget() {
-LBUFFER="${LBUFFER[(w)0,(w)-2]} $(__fsel)"
-  local ret=$?
-  zle reset-prompt
-  return $ret
+	LBUFFER="${LBUFFER[(w)0,(w)-2]} $(__fsel)"
+	local ret=$?
+	zle reset-prompt
+	return $ret
 }
 zle     -N   fzf-file-widget
 bindkey '^T' fzf-file-widget
