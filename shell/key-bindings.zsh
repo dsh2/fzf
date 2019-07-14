@@ -110,6 +110,7 @@ fzf-history-widget() {
 			# TODO: re-enable tmux support
 			# $(__fzfcmd) \
 			fzf \
+			--multi \
 			--no-sort \
 			--preview "
 				echo COMMAND: {7..} | pygmentize -l zsh;
@@ -126,18 +127,25 @@ fzf-history-widget() {
 
 		query=$fzf_result[1]
 		local key=$fzf_result[2]
-		local selection=$fzf_result[3]
 		case "$key" in
 			"ctrl-m")
-				local event_id=$selection[(w)1]
-				if [[ $event_id == $aborted_id ]]; then
-					zle kill-whole-line
-					zle -U "$ZLE_LINE_ABORTED"
-				elif (( event_id )) then
-					zle vi-fetch-history -n $event_id
-				else
-					zle -M "fc returned illegal event id (\"$key\")."
-				fi
+				local new_cmd_line
+				local separator
+				local events=(${fzf_result:2})
+				for event in $events; do
+					local event_id=$event[(w)1]
+					if [[ $event_id == $aborted_id ]]; then
+						new_cmd_line+=$ZLE_LINE_ABORTED
+					elif (( event_id )) then
+						new_cmd_line+="$separator$history[$event_id]"
+					else
+						zle -M "fc returned illegal event id (event_id = \"$event_id\")."
+					fi
+					separator='; ' 
+					# separator=$'\n'
+				done
+				BUFFER=$new_cmd_line
+				CURSOR=$#new_cmd_line
 				return
 				;;
 			"$mode_switch_key")
