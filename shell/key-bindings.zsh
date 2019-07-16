@@ -134,6 +134,7 @@ fzf-history-widget() {
 				local events=(${fzf_result:2})
 				for event in $events; do
 					local event_id=$event[(w)1]
+					[ ${event_id: -1} = "*" ] && { event_id=${event_id: : -1} }
 					if [[ $event_id == $aborted_id ]]; then
 						new_cmd_line+=$ZLE_LINE_ABORTED
 					elif (( event_id )) then
