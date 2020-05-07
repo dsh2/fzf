@@ -105,7 +105,7 @@ fzf-history-widget() {
 			# TODO: Add support for nested abortion
 				[[ -n $ZLE_LINE_ABORTED ]] && 
 					echo -e $aborted_id\\t$(date +$time_format)\ $ZLE_LINE_ABORTED ;
-				fc $=mode_fd_param -rlEDt '%a %F  %T' 1 2> /dev/null | uniq -f 6
+				fc $=mode_fd_param -rlEDt '%a %F  %T' 1 2> /dev/null | sed 's:[[:space:]]$::' | uniq -f 6
 			) |
 			# TODO: re-enable tmux support
 			# $(__fzfcmd) \
