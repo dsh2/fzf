@@ -19,17 +19,67 @@ type ansiState struct {
 	fg   tui.Color
 	bg   tui.Color
 	attr tui.Attr
+	lbg  tui.Color
 }
 
 func (s *ansiState) colored() bool {
-	return s.fg != -1 || s.bg != -1 || s.attr > 0
+	return s.fg != -1 || s.bg != -1 || s.attr > 0 || s.lbg >= 0
 }
 
 func (s *ansiState) equals(t *ansiState) bool {
 	if t == nil {
 		return !s.colored()
 	}
-	return s.fg == t.fg && s.bg == t.bg && s.attr == t.attr
+	return s.fg == t.fg && s.bg == t.bg && s.attr == t.attr && s.lbg == t.lbg
+}
+
+func (s *ansiState) ToString() string {
+	if !s.colored() {
+		return ""
+	}
+
+	ret := ""
+	if s.attr&tui.Bold > 0 {
+		ret += "1;"
+	}
+	if s.attr&tui.Dim > 0 {
+		ret += "2;"
+	}
+	if s.attr&tui.Italic > 0 {
+		ret += "3;"
+	}
+	if s.attr&tui.Underline > 0 {
+		ret += "4;"
+	}
+	if s.attr&tui.Blink > 0 {
+		ret += "5;"
+	}
+	if s.attr&tui.Reverse > 0 {
+		ret += "7;"
+	}
+	ret += toAnsiString(s.fg, 30) + toAnsiString(s.bg, 40)
+
+	return "\x1b[" + strings.TrimSuffix(ret, ";") + "m"
+}
+
+func toAnsiString(color tui.Color, offset int) string {
+	col := int(color)
+	ret := ""
+	if col == -1 {
+		ret += strconv.Itoa(offset + 9)
+	} else if col < 8 {
+		ret += strconv.Itoa(offset + col)
+	} else if col < 16 {
+		ret += strconv.Itoa(offset - 30 + 90 + col - 8)
+	} else if col < 256 {
+		ret += strconv.Itoa(offset+8) + ";5;" + strconv.Itoa(col)
+	} else if col >= (1 << 24) {
+		r := strconv.Itoa((col >> 16) & 0xff)
+		g := strconv.Itoa((col >> 8) & 0xff)
+		b := strconv.Itoa(col & 0xff)
+		ret += strconv.Itoa(offset+8) + ";2;" + r + ";" + g + ";" + b
+	}
+	return ret + ";"
 }
 
 var ansiRegex *regexp.Regexp
@@ -41,10 +91,11 @@ func init() {
 		- http://ascii-table.com/ansi-escape-sequences.php
 		- http://ascii-table.com/ansi-escape-sequences-vt-100.php
 		- http://tldp.org/HOWTO/Bash-Prompt-HOWTO/x405.html
+		- https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
 	*/
 	// The following regular expression will include not all but most of the
 	// frequently used ANSI sequences
-	ansiRegex = regexp.MustCompile("(?:\x1b[\\[()][0-9;]*[a-zA-Z@]|\x1b.|[\x0e\x0f]|.\x08)")
+	ansiRegex = regexp.MustCompile("(?:\x1b[\\[()][0-9;]*[a-zA-Z@]|\x1b][0-9];[[:print:]]+(?:\x1b\\\\|\x07)|\x1b.|[\x0e\x0f]|.\x08)")
 }
 
 func findAnsiStart(str string) int {
@@ -145,11 +196,14 @@ func interpretCode(ansiCode string, prevState *ansiState) *ansiState {
 	// State
 	var state *ansiState
 	if prevState == nil {
-		state = &ansiState{-1, -1, 0}
+		state = &ansiState{-1, -1, 0, -1}
 	} else {
-		state = &ansiState{prevState.fg, prevState.bg, prevState.attr}
+		state = &ansiState{prevState.fg, prevState.bg, prevState.attr, prevState.lbg}
 	}
 	if ansiCode[0] != '\x1b' || ansiCode[1] != '[' || ansiCode[len(ansiCode)-1] != 'm' {
+		if strings.HasSuffix(ansiCode, "0K") {
+			state.lbg = prevState.bg
+		}
 		return state
 	}
 
@@ -194,6 +248,10 @@ func interpretCode(ansiCode string, prevState *ansiState) *ansiState {
 					state.attr = state.attr | tui.Blink
 				case 7:
 					state.attr = state.attr | tui.Reverse
+				case 23: // tput rmso
+					state.attr = state.attr &^ tui.Italic
+				case 24: // tput rmul
+					state.attr = state.attr &^ tui.Underline
 				case 0:
 					init()
 				default:
