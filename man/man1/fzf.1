@@ -1,7 +1,7 @@
 .ig
 The MIT License (MIT)
 
-Copyright (c) 2013-2020 Junegunn Choi
+Copyright (c) 2013-2021 Junegunn Choi
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ..
-.TH fzf 1 "Dec 2020" "fzf 0.24.4" "fzf - a command-line fuzzy finder"
+.TH fzf 1 "Mar 2021" "fzf 0.26.0" "fzf - a command-line fuzzy finder"
 
 .SH NAME
 fzf - a command-line fuzzy finder
@@ -71,9 +71,10 @@ Transform the presentation of each line using field index expressions
 .BI "-d, --delimiter=" "STR"
 Field delimiter regex for \fB--nth\fR and \fB--with-nth\fR (default: AWK-style)
 .TP
-.BI "--phony"
+.BI "--disabled"
 Do not perform search. With this option, fzf becomes a simple selector
-interface rather than a "fuzzy finder".
+interface rather than a "fuzzy finder". You can later enable the search using
+\fBenable-search\fR or \fBtoggle-search\fR action.
 .SS Search result
 .TP
 .B "+s, --no-sort"
@@ -323,6 +324,8 @@ color mappings.
     \fBbg+        \fRBackground (current line)
     \fBgutter     \fRGutter on the left (defaults to \fBbg+\fR)
     \fBhl+        \fRHighlighted substrings (current line)
+    \fBquery      \fRQuery string
+    \fBdisabled   \fRQuery string when search is disabled
     \fBinfo       \fRInfo line (match counters)
     \fBborder     \fRBorder around the window (\fB--border\fR and \fB--preview\fR)
     \fBprompt     \fRPrompt
@@ -439,7 +442,7 @@ e.g.
       done'\fR
 .RE
 .TP
-.BI "--preview-window=" "[POSITION][:SIZE[%]][:rounded|sharp|noborder][:[no]wrap][:[no]follow][:[no]cycle][:[no]hidden][:+SCROLL[-OFFSET]][:default]"
+.BI "--preview-window=" "[POSITION][:SIZE[%]][:rounded|sharp|noborder][:[no]wrap][:[no]follow][:[no]cycle][:[no]hidden][:+SCROLL[OFFSETS][/DENOM]][:~HEADER_LINES][:default]"
 
 .RS
 .B POSITION: (default: right)
@@ -477,12 +480,17 @@ e.g.
 \fBrounded\fR (border with rounded edges, default), \fBsharp\fR (border with
 sharp edges), or \fBnoborder\fR (no border).
 
-* \fB+SCROLL[-OFFSET]\fR determines the initial scroll offset of the preview
-window. \fBSCROLL\fR can be either a numeric integer or a single-field index
-expression that refers to a numeric integer. The optional \fB-OFFSET\fR part is
-for adjusting the base offset so that you can see the text above it. It should
-be given as a numeric integer (\fB-INTEGER\fR), or as a denominator form
-(\fB-/INTEGER\fR) for specifying a fraction of the preview window height.
+* \fB[:+SCROLL[OFFSETS][/DENOM]]\fR determines the initial scroll offset of the
+preview window.
+
+  - \fBSCROLL\fR can be either a numeric integer or a single-field index expression that refers to a numeric integer.
+
+  - The optional \fBOFFSETS\fR part is for adjusting the base offset. It should be given as a series of signed integers (\fB-INTEGER\fR or \fB+INTEGER\fR).
+
+  - The final \fB/DENOM\fR part is for specifying a fraction of the preview window height.
+
+* \fB~HEADER_LINES\fR keeps the top N lines as the fixed header so that they
+are always visible.
 
 * \fBdefault\fR resets all options previously set to the default.
 
@@ -495,14 +503,23 @@ e.g.
      # Initial scroll offset is set to the line number of each line of
      # git grep output *minus* 5 lines (-5)
      git grep --line-number '' |
-       fzf --delimiter : --preview 'nl {1}' --preview-window +{2}-5
+       fzf --delimiter : --preview 'nl {1}' --preview-window '+{2}-5'
 
-     # Preview with bat, matching line in the middle of the window (-/2)
+     # Preview with bat, matching line in the middle of the window below
+     # the fixed header of the top 3 lines
+     #
+     #   ~3    Top 3 lines as the fixed header
+     #   +{2}  Base scroll offset extracted from the second field
+     #   +3    Extra offset to compensate for the 3-line header
+     #   /2    Put in the middle of the preview area
+     #
      git grep --line-number '' |
        fzf --delimiter : \\
-           --preview 'bat --style=numbers --color=always --highlight-line {2} {1}' \\
-           --preview-window +{2}-/2\fR
+           --preview 'bat --style=full --color=always --highlight-line {2} {1}' \\
+           --preview-window '~3:+{2}+3/2'
 
+     # Display top 3 lines as the fixed header
+     fzf --preview 'bat --style=full --color=always {}' --preview-window '~3'\fR
 .RE
 
 .SS Scripting
@@ -567,7 +584,8 @@ Note that most options have the opposite versions with \fB--no-\fR prefix.
 .TP
 .B FZF_DEFAULT_COMMAND
 Default command to use when input is tty. On *nix systems, fzf runs the command
-with \fBsh -c\fR, so make sure that it's POSIX-compliant.
+with \fB$SHELL -c\fR if \fBSHELL\fR is set, otherwise with \fBsh -c\fR, so in
+this case make sure that the command is POSIX-compliant.
 .TP
 .B FZF_DEFAULT_OPTS
 Default options. e.g. \fBexport FZF_DEFAULT_OPTS="--extended --cycle"\fR
@@ -666,9 +684,7 @@ e.g.
 .br
 \fIctrl-alt-[a-z]\fR
 .br
-\fIalt-[a-z]\fR
-.br
-\fIalt-[0-9]\fR
+\fIalt-[*]\fR     (Any case-sensitive single character is allowed)
 .br
 \fIf[1-12]\fR
 .br
@@ -691,8 +707,6 @@ e.g.
 \fIalt-space\fR
 .br
 \fIalt-bspace\fR  (\fIalt-bs\fR)
-.br
-\fIalt-/\fR
 .br
 \fItab\fR
 .br
@@ -750,8 +764,8 @@ or any single character
 Triggered whenever the query string is changed
 
 e.g.
-     \fB# Moves cursor to the top (or bottom depending on --layout) whenever the query is changed
-     fzf --bind change:top\fR
+     \fB# Move cursor to the first entry whenever the query is changed
+     fzf --bind change:first\fR
 .RE
 
 \fIbackward-eof\fR
@@ -780,14 +794,19 @@ A key or an event can be bound to one or more of the following actions.
     \fBchange-prompt(...)\fR        (change prompt to the given string)
     \fBclear-screen\fR              \fIctrl-l\fR
     \fBclear-selection\fR           (clear multi-selection)
+    \fBclose\fR                     (close preview window if open, abort fzf otherwise)
     \fBclear-query\fR               (clear query string)
     \fBdelete-char\fR               \fIdel\fR
     \fBdelete-char/eof\fR           \fIctrl-d\fR (same as \fBdelete-char\fR except aborts fzf if query is empty)
+    \fBdeselect\fR
     \fBdeselect-all\fR              (deselect all matches)
+    \fBdisable-search\fR            (disable search functionality)
     \fBdown\fR                      \fIctrl-j  ctrl-n  down\fR
+    \fBenable-search\fR             (enable search functionality)
     \fBend-of-line\fR               \fIctrl-e  end\fR
     \fBexecute(...)\fR              (see below for the details)
     \fBexecute-silent(...)\fR       (see below for the details)
+    \fBfirst\fR                     (move to the first match)
     \fBforward-char\fR              \fIctrl-f  right\fR
     \fBforward-word\fR              \fIalt-f   shift-right\fR
     \fBignore\fR
@@ -795,6 +814,7 @@ A key or an event can be bound to one or more of the following actions.
     \fBjump-accept\fR               (jump and accept)
     \fBkill-line\fR
     \fBkill-word\fR                 \fIalt-d\fR
+    \fBlast\fR                      (move to the last match)
     \fBnext-history\fR              (\fIctrl-n\fR on \fB--history\fR)
     \fBpage-down\fR                 \fIpgdn\fR
     \fBpage-up\fR                   \fIpgup\fR
@@ -807,11 +827,14 @@ A key or an event can be bound to one or more of the following actions.
     \fBpreview-page-up\fR
     \fBpreview-half-page-down\fR
     \fBpreview-half-page-up\fR
+    \fBpreview-bottom\fR
+    \fBpreview-top\fR
     \fBprevious-history\fR          (\fIctrl-p\fR on \fB--history\fR)
     \fBprint-query\fR               (print query and exit)
     \fBrefresh-preview\fR
     \fBreload(...)\fR               (see below for the details)
     \fBreplace-query\fR             (replace query string with the current selection)
+    \fBselect\fR
     \fBselect-all\fR                (select all matches)
     \fBtoggle\fR                    (\fIright-click\fR)
     \fBtoggle-all\fR                (toggle all matches)
@@ -820,9 +843,9 @@ A key or an event can be bound to one or more of the following actions.
     \fBtoggle-out\fR                (\fB--layout=reverse*\fR ? \fBtoggle+down\fR : \fBtoggle+up\fR)
     \fBtoggle-preview\fR
     \fBtoggle-preview-wrap\fR
+    \fBtoggle-search\fR             (toggle search functionality)
     \fBtoggle-sort\fR
     \fBtoggle+up\fR                 \fIbtab    (shift-tab)\fR
-    \fBtop\fR                       (move to the top result)
     \fBunix-line-discard\fR         \fIctrl-u\fR
     \fBunix-word-rubout\fR          \fIctrl-w\fR
     \fBup\fR                        \fIctrl-k  ctrl-p  up\fR
@@ -885,6 +908,10 @@ executes the command without the switching. Note that fzf will not be
 responsive until the command is complete. For asynchronous execution, start
 your command as a background process (i.e. appending \fB&\fR).
 
+On *nix systems, fzf runs the command with \fB$SHELL -c\fR if \fBSHELL\fR is
+set, otherwise with \fBsh -c\fR, so in this case make sure that the command is
+POSIX-compliant.
+
 .SS RELOAD INPUT
 
 \fBreload(...)\fR action is used to dynamically update the input list
@@ -903,7 +930,7 @@ e.g.
      INITIAL_QUERY="foobar"
      FZF_DEFAULT_COMMAND="$RG_PREFIX '$INITIAL_QUERY'" \\
        fzf --bind "change:reload:$RG_PREFIX {q} || true" \\
-           --ansi --phony --query "$INITIAL_QUERY"\fR
+           --ansi --disabled --query "$INITIAL_QUERY"\fR
 
 .SS PREVIEW BINDING
 

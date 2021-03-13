@@ -424,10 +424,10 @@ try
     throw v:exception
   endtry
 
-  if !has_key(dict, 'dir')
+  if !s:present(dict, 'dir')
     let dict.dir = s:fzf_getcwd()
   endif
-  if has('win32unix') && has_key(dict, 'dir')
+  if has('win32unix') && s:present(dict, 'dir')
     let dict.dir = fnamemodify(dict.dir, ':p')
   endif
 
@@ -764,6 +764,13 @@ function! s:split(dict)
   endtry
 endfunction
 
+nnoremap <silent> <Plug>(fzf-insert) i
+nnoremap <silent> <Plug>(fzf-normal) <Nop>
+if exists(':tnoremap')
+  tnoremap <silent> <Plug>(fzf-insert) <C-\><C-n>i
+  tnoremap <silent> <Plug>(fzf-normal) <C-\><C-n>
+endif
+
 function! s:execute_term(dict, command, temps) abort
   let winrest = winrestcmd()
   let pbuf = bufnr('')
@@ -776,7 +783,7 @@ function! s:execute_term(dict, command, temps) abort
   function! fzf.switch_back(inplace)
     if a:inplace && bufnr('') == self.buf
       if bufexists(self.pbuf)
-        execute 'keepalt b' self.pbuf
+        execute 'keepalt keepjumps b' self.pbuf
       endif
       " No other listed buffer
       if bufnr('') == self.buf
@@ -816,6 +823,10 @@ function! s:execute_term(dict, command, temps) abort
     call s:pushd(self.dict)
     call s:callback(self.dict, lines)
     call self.switch_back(s:getpos() == self.ppos)
+
+    if &buftype == 'terminal'
+      call feedkeys(&filetype == 'fzf' ? "\<Plug>(fzf-insert)" : "\<Plug>(fzf-normal)")
+    endif
   endfunction
 
   try
@@ -832,6 +843,9 @@ function! s:execute_term(dict, command, temps) abort
       call termopen(command, fzf)
     else
       let term_opts = {'exit_cb': function(fzf.on_exit)}
+      if v:version >= 802
+        let term_opts.term_kill = 'term'
+      endif
       if is_popup
         let term_opts.hidden = 1
       else
@@ -904,13 +918,9 @@ if has('nvim')
   function s:create_popup(hl, opts) abort
     let buf = nvim_create_buf(v:false, v:true)
     let opts = extend({'relative': 'editor', 'style': 'minimal'}, a:opts)
-    let border = has_key(opts, 'border') ? remove(opts, 'border') : []
     let win = nvim_open_win(buf, v:true, opts)
     call setwinvar(win, '&winhighlight', 'NormalFloat:'..a:hl)
     call setwinvar(win, '&colorcolumn', '')
-    if !empty(border)
-      call nvim_buf_set_lines(buf, 0, -1, v:true, border)
-    endif
     return buf
   endfunction
 else

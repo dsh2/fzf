@@ -20,15 +20,15 @@ if 'zmodload' 'zsh/parameter' 2>'/dev/null' && (( ${+options} )); then
   __fzf_key_bindings_options="options=(${(j: :)${(kv)options[@]}})"
 else
   () {
-    __fzf_key_bindings_options="setopt"
-    'local' '__fzf_opt'
-    for __fzf_opt in "${(@)${(@f)$(set -o)}%% *}"; do
-      if [[ -o "$__fzf_opt" ]]; then
-        __fzf_key_bindings_options+=" -o $__fzf_opt"
-      else
-        __fzf_key_bindings_options+=" +o $__fzf_opt"
-      fi
-    done
+	__fzf_key_bindings_options="setopt"
+	'local' '__fzf_opt'
+	for __fzf_opt in "${(@)${(@f)$(set -o)}%% *}"; do
+	  if [[ -o "$__fzf_opt" ]]; then
+		__fzf_key_bindings_options+=" -o $__fzf_opt"
+	  else
+		__fzf_key_bindings_options+=" +o $__fzf_opt"
+	  fi
+	done
   }
 fi
 
@@ -41,38 +41,38 @@ fi
 # CTRL-T - Paste the selected file path(s) into the command line
 # TODO: Use a more advanced preview than strings (ranger scope?)
 __fsel() {
-    setopt localoptions pipefail 
-    REPORTTIME=-1
-    FIND_PRINTF='%y%m\t%n\t%TY-%Tm-%Td\t%TH:%TM\t%u:%g\t%kk\t%p\n'
-    FIND_COLUMNS=${(ws:\t:)#FIND_PRINTF}
+	setopt localoptions pipefail 
+	REPORTTIME=-1
+	FIND_PRINTF='%y%m\t%n\t%TY-%Tm-%Td\t%TH:%TM\t%u:%g\t%kk\t%p\n'
+	FIND_COLUMNS=${(ws:\t:)#FIND_PRINTF}
 	local dir=${LBUFFER[(w)-1]}
 	# local dir="~/.pcap"
 	[[ -d $dir ]] || dir=
-    command find -P $dir \
+	command find -P $dir \
 		-mindepth 1  \
 		-printf $FIND_PRINTF \
 		2> /dev/null |
 	 $(__fzfcmd) \
-	     --sort \
-	     --multi \
-	     --tabstop=6 \
-	     --preview-window=top:50% \
-	     --preview="
-		    echo -n \"file: \";
-		    file --brief \
-			    --preserve-date \
-			    --special-files \
-			    --uncompress {$FIND_COLUMNS..}; \
-		    strings {$FIND_COLUMNS..}" |
-    while read item; do
+		 --sort \
+		 --multi \
+		 --tabstop=6 \
+		 --preview-window=top:50% \
+		 --preview="
+			echo -n \"file: \";
+			file --brief \
+				--preserve-date \
+				--special-files \
+				--uncompress {$FIND_COLUMNS..}; \
+			strings {$FIND_COLUMNS..}" |
+	while read item; do
 	local file=$(echo $item | cut -f 7-)
 		echo -n "${(q)file} "
-    done
+	done
 }
 
 __fzfcmd() {
   [ -n "$TMUX_PANE" ] && { [ "${FZF_TMUX:-0}" != 0 ] || [ -n "$FZF_TMUX_OPTS" ]; } &&
-    echo "fzf-tmux ${FZF_TMUX_OPTS:--d${FZF_TMUX_HEIGHT:-40%}} -- " || echo "fzf"
+	echo "fzf-tmux ${FZF_TMUX_OPTS:--d${FZF_TMUX_HEIGHT:-40%}} -- " || echo "fzf"
 }
 
 fzf-file-widget() {
@@ -88,7 +88,7 @@ bindkey '^T' fzf-file-widget
 fzf-redraw-prompt() {
   local precmd
   for precmd in $precmd_functions; do
-    $precmd
+	$precmd
   done
   zle reset-prompt
 }
@@ -97,19 +97,19 @@ zle -N fzf-redraw-prompt
 # ALT-C - cd into the selected directory
 fzf-cd-widget() {
   local cmd="${FZF_ALT_C_COMMAND:-"command find -L . -mindepth 1 -maxdepth 5 \\( -path '*/\\.*' -o -fstype 'sysfs' -o -fstype 'devfs' -o -fstype 'devtmpfs' -o -fstype 'proc' \\) -prune \
-    -o -type d -print 2> /dev/null | cut -b3-"}"
+	-o -type d -print 2> /dev/null | cut -b3-"}"
   setopt localoptions pipefail no_aliases 2> /dev/null
   local dir="$(eval "$cmd" | FZF_DEFAULT_OPTS="--height ${FZF_TMUX_HEIGHT:-40%} --reverse $FZF_DEFAULT_OPTS $FZF_ALT_C_OPTS" $(__fzfcmd) +m)"
   if [[ -z "$dir" ]]; then
-    zle redisplay
-    return 0
+	zle redisplay
+	return 0
   fi
   if [ -z "$BUFFER" ]; then
-    BUFFER="cd ${(q)dir}"
-    zle accept-line
+	BUFFER="cd ${(q)dir}"
+	zle accept-line
   else
-    print -sr "cd ${(q)dir}"
-    cd "$dir"
+	print -sr "cd ${(q)dir}"
+	cd "$dir"
   fi
   local ret=$?
   unset dir # ensure this doesn't end up appearing in prompt expansion

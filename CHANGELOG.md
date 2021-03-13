@@ -1,7 +1,41 @@
 CHANGELOG
 =========
 
-0.24.5
+0.26.0
+------
+- Added support for fixed header in preview window
+  ```sh
+  # Display top 3 lines as the fixed header
+  fzf --preview 'bat --style=header,grid --color=always {}' --preview-window '~3'
+  ```
+- More advanced preview offset expression to better support the fixed header
+  ```sh
+  # Preview with bat, matching line in the middle of the window below
+  # the fixed header of the top 3 lines
+  #
+  #   ~3    Top 3 lines as the fixed header
+  #   +{2}  Base scroll offset extracted from the second field
+  #   +3    Extra offset to compensate for the 3-line header
+  #   /2    Put in the middle of the preview area
+  #
+  git grep --line-number '' |
+    fzf --delimiter : \
+        --preview 'bat --style=full --color=always --highlight-line {2} {1}' \
+        --preview-window '~3:+{2}+3/2'
+  ```
+- Added `select` and `deselect` action for unconditionally selecting or
+  deselecting a single item in `--multi` mode. Complements `toggle` action.
+- Sigificant performance improvement in ANSI code processing
+- Bug fixes and improvements
+- Built with Go 1.16
+
+0.25.1
+------
+- Added `close` action
+    - Close preview window if open, abort fzf otherwise
+- Bug fixes and improvements
+
+0.25.0
 ------
 - Text attributes set in `--color` are not reset when fzf sees another
   `--color` option for the same element. This allows you to put custom text
@@ -22,6 +56,21 @@ CHANGELOG
 
   # Write "regular" if you want to clear the attributes
   fzf --color hl:176:regular,hl+:177:regular
+  ```
+- Renamed `--phony` to `--disabled`
+- You can dynamically enable and disable the search functionality using the
+  new `enable-search`, `disable-search`, and `toggle-search` actions
+- You can assign a different color to the query string for when search is disabled
+  ```sh
+  fzf --color query:#ffffff,disabled:#999999 --bind space:toggle-search
+  ```
+- Added `last` action to move the cursor to the last match
+    - The opposite action `top` is renamed to `first`, but `top` is still
+      recognized as a synonym for backward compatibility
+- Added `preview-top` and `preview-bottom` actions
+- Extended support for alt key chords: alt with any case-sensitive single character
+  ```sh
+  fzf --bind alt-,:first,alt-.:last
   ```
 
 0.24.4

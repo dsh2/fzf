@@ -171,19 +171,23 @@ list:
 
 - `element` is an fzf element to apply a color to:
 
-  | Element               | Description                                           |
-  | ---                   | ---                                                   |
-  | `fg`  / `bg`  / `hl`  | Item (foreground / background / highlight)            |
-  | `fg+` / `bg+` / `hl+` | Current item (foreground / background / highlight)    |
-  | `hl`  / `hl+`         | Highlighted substrings (normal / current)             |
-  | `gutter`              | Background of the gutter on the left                  |
-  | `pointer`             | Pointer to the current line (`>`)                     |
-  | `marker`              | Multi-select marker (`>`)                             |
-  | `border`              | Border around the window (`--border` and `--preview`) |
-  | `header`              | Header (`--header` or `--header-lines`)               |
-  | `info`                | Info line (match counters)                            |
-  | `spinner`             | Streaming input indicator                             |
-  | `prompt`              | Prompt before query (`> `)                            |
+  | Element                     | Description                                           |
+  | ---                         | ---                                                   |
+  | `fg`  / `bg`  / `hl`        | Item (foreground / background / highlight)            |
+  | `fg+` / `bg+` / `hl+`       | Current item (foreground / background / highlight)    |
+  | `preview-fg` / `preview-bg` | Preview window text and background                    |
+  | `hl`  / `hl+`               | Highlighted substrings (normal / current)             |
+  | `gutter`                    | Background of the gutter on the left                  |
+  | `pointer`                   | Pointer to the current line (`>`)                     |
+  | `marker`                    | Multi-select marker (`>`)                             |
+  | `border`                    | Border around the window (`--border` and `--preview`) |
+  | `header`                    | Header (`--header` or `--header-lines`)               |
+  | `info`                      | Info line (match counters)                            |
+  | `spinner`                   | Streaming input indicator                             |
+  | `query`                     | Query string                                          |
+  | `disabled`                  | Query string when search is disabled                  |
+  | `prompt`                    | Prompt before query (`> `)                            |
+  | `pointer`                   | Pointer to the current line (`>`)                     |
 
 - `component` specifies the component (`fg` / `bg`) from which to extract the
   color when considering each of the following highlight groups
@@ -358,7 +362,7 @@ Our `:LS` command will be much more useful if we can pass a directory argument
 to it, so that something like `:LS /tmp` is possible.
 
 ```vim
-command! -bang -complete=dir -nargs=* LS
+command! -bang -complete=dir -nargs=? LS
     \ call fzf#run(fzf#wrap({'source': 'ls', 'dir': <q-args>}, <bang>0))
 ```
 
@@ -368,7 +372,7 @@ a unique name to our command and pass it as the first argument to `fzf#wrap`.
 ```vim
 " The query history for this command will be stored as 'ls' inside g:fzf_history_dir.
 " The name is ignored if g:fzf_history_dir is not defined.
-command! -bang -complete=dir -nargs=* LS
+command! -bang -complete=dir -nargs=? LS
     \ call fzf#run(fzf#wrap('ls', {'source': 'ls', 'dir': <q-args>}, <bang>0))
 ```
 
@@ -406,7 +410,6 @@ The latest versions of Vim and Neovim include builtin terminal emulator
 " Optional:
 " - xoffset [float default 0.5 range [0 ~ 1]]
 " - yoffset [float default 0.5 range [0 ~ 1]]
-" - highlight [string default 'Comment']: Highlight group for border
 " - border [string default 'rounded']: Border style
 "   - 'rounded' / 'sharp' / 'horizontal' / 'vertical' / 'top' / 'bottom' / 'left' / 'right'
 let g:fzf_layout = { 'window': { 'width': 0.9, 'height': 0.6 } }
@@ -446,4 +449,4 @@ endif
 
 The MIT License (MIT)
 
-Copyright (c) 2013-2020 Junegunn Choi
+Copyright (c) 2013-2021 Junegunn Choi

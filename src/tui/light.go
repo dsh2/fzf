@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"regexp"
@@ -230,7 +231,7 @@ func (r *LightRenderer) getBytesInternal(buffer []byte, nonblock bool) []byte {
 	}
 
 	retries := 0
-	if c == ESC || nonblock {
+	if c == ESC.Int() || nonblock {
 		retries = r.escDelay / escPollInterval
 	}
 	buffer = append(buffer, byte(c))
@@ -245,7 +246,7 @@ func (r *LightRenderer) getBytesInternal(buffer []byte, nonblock bool) []byte {
 				continue
 			}
 			break
-		} else if c == ESC && pc != c {
+		} else if c == ESC.Int() && pc != c {
 			retries = r.escDelay / escPollInterval
 		} else {
 			retries = 0
@@ -278,11 +279,11 @@ func (r *LightRenderer) GetChar() Event {
 	}()
 
 	switch r.buffer[0] {
-	case CtrlC:
+	case CtrlC.Byte():
 		return Event{CtrlC, 0, nil}
-	case CtrlG:
+	case CtrlG.Byte():
 		return Event{CtrlG, 0, nil}
-	case CtrlQ:
+	case CtrlQ.Byte():
 		return Event{CtrlQ, 0, nil}
 	case 127:
 		return Event{BSpace, 0, nil}
@@ -296,7 +297,7 @@ func (r *LightRenderer) GetChar() Event {
 		return Event{CtrlCaret, 0, nil}
 	case 31:
 		return Event{CtrlSlash, 0, nil}
-	case ESC:
+	case ESC.Byte():
 		ev := r.escSequence(&sz)
 		// Second chance
 		if ev.Type == Invalid {
@@ -307,8 +308,8 @@ func (r *LightRenderer) GetChar() Event {
 	}
 
 	// CTRL-A ~ CTRL-Z
-	if r.buffer[0] <= CtrlZ {
-		return Event{int(r.buffer[0]), 0, nil}
+	if r.buffer[0] <= CtrlZ.Byte() {
+		return Event{EventType(r.buffer[0]), 0, nil}
 	}
 	char, rsz := utf8.DecodeRune(r.buffer)
 	if char == utf8.RuneError {
@@ -331,26 +332,16 @@ func (r *LightRenderer) escSequence(sz *int) Event {
 
 	*sz = 2
 	if r.buffer[1] >= 1 && r.buffer[1] <= 'z'-'a'+1 {
-		return Event{int(CtrlAltA + r.buffer[1] - 1), 0, nil}
+		return CtrlAltKey(rune(r.buffer[1] + 'a' - 1))
 	}
 	alt := false
-	if len(r.buffer) > 2 && r.buffer[1] == ESC {
+	if len(r.buffer) > 2 && r.buffer[1] == ESC.Byte() {
 		r.buffer = r.buffer[1:]
 		alt = true
 	}
 	switch r.buffer[1] {
-	case ESC:
+	case ESC.Byte():
 		return Event{ESC, 0, nil}
-	case ' ':
-		return Event{AltSpace, 0, nil}
-	case '/':
-		return Event{AltSlash, 0, nil}
-	case 'b':
-		return Event{AltB, 0, nil}
-	case 'd':
-		return Event{AltD, 0, nil}
-	case 'f':
-		return Event{AltF, 0, nil}
 	case 127:
 		return Event{AltBS, 0, nil}
 	case '[', 'O':
@@ -518,11 +509,11 @@ func (r *LightRenderer) escSequence(sz *int) Event {
 			} // r.buffer[2]
 		} // r.buffer[2]
 	} // r.buffer[1]
-	if r.buffer[1] >= 'a' && r.buffer[1] <= 'z' {
-		return Event{AltA + int(r.buffer[1]) - 'a', 0, nil}
-	}
-	if r.buffer[1] >= '0' && r.buffer[1] <= '9' {
-		return Event{Alt0 + int(r.buffer[1]) - '0', 0, nil}
+	rest := bytes.NewBuffer(r.buffer[1:])
+	c, size, err := rest.ReadRune()
+	if err == nil {
+		*sz = 1 + size
+		return AltKey(c)
 	}
 	return Event{Invalid, 0, nil}
 }
@@ -915,12 +906,6 @@ func (w *LightWindow) fill(str string, onMove func()) FillReturn {
 	for i, line := range allLines {
 		lines := wrapLine(line, w.posx, w.width, w.tabstop)
 		for j, wl := range lines {
-			if w.posx >= w.Width()-1 && wl.displayWidth == 0 {
-				if w.posy < w.height-1 {
-					w.Move(w.posy+1, 0)
-				}
-				return FillNextLine
-			}
 			w.stderrInternal(wl.text, false)
 			w.posx += wl.displayWidth
 
@@ -934,6 +919,14 @@ func (w *LightWindow) fill(str string, onMove func()) FillReturn {
 				onMove()
 			}
 		}
+	}
+	if w.posx+1 >= w.Width() {
+		if w.posy+1 >= w.height {
+			return FillSuspend
+		}
+		w.Move(w.posy+1, 0)
+		onMove()
+		return FillNextLine
 	}
 	return FillContinue
 }
