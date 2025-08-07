@@ -12,7 +12,10 @@ differ depending on the package manager.
 " If installed using Homebrew
 set rtp+=/usr/local/opt/fzf
 
-" If installed using git
+" If installed using Homebrew on Apple Silicon
+set rtp+=/opt/homebrew/opt/fzf
+
+" If you have cloned fzf on ~/.fzf directory
 set rtp+=~/.fzf
 ```
 
@@ -23,7 +26,10 @@ written as:
 " If installed using Homebrew
 Plug '/usr/local/opt/fzf'
 
-" If installed using git
+" If installed using Homebrew on Apple Silicon
+Plug '/opt/homebrew/opt/fzf'
+
+" If you have cloned fzf on ~/.fzf directory
 Plug '~/.fzf'
 ```
 
@@ -115,7 +121,7 @@ let g:fzf_action = {
 
 " An action can be a reference to a function that processes selected lines
 function! s:build_quickfix_list(lines)
-  call setqflist(map(copy(a:lines), '{ "filename": v:val }'))
+  call setqflist(map(copy(a:lines), '{ "filename": v:val, "lnum": 1 }'))
   copen
   cc
 endfunction
@@ -127,8 +133,14 @@ let g:fzf_action = {
   \ 'ctrl-v': 'vsplit' }
 
 " Default fzf layout
-" - Popup window
+" - Popup window (center of the screen)
 let g:fzf_layout = { 'window': { 'width': 0.9, 'height': 0.6 } }
+
+" - Popup window (center of the current window)
+let g:fzf_layout = { 'window': { 'width': 0.9, 'height': 0.6, 'relative': v:true } }
+
+" - Popup window (anchored to the bottom of the current window)
+let g:fzf_layout = { 'window': { 'width': 0.9, 'height': 0.6, 'relative': v:true, 'yoffset': 1.0 } }
 
 " - down / up / left / right
 let g:fzf_layout = { 'down': '40%' }
@@ -143,6 +155,7 @@ let g:fzf_layout = { 'window': '10new' }
 let g:fzf_colors =
 \ { 'fg':      ['fg', 'Normal'],
   \ 'bg':      ['bg', 'Normal'],
+  \ 'query':   ['fg', 'Normal'],
   \ 'hl':      ['fg', 'Comment'],
   \ 'fg+':     ['fg', 'CursorLine', 'CursorColumn', 'Normal'],
   \ 'bg+':     ['bg', 'CursorLine', 'CursorColumn'],
@@ -226,19 +239,20 @@ call fzf#run({'sink': 'e'})
 ```
 
 We haven't specified the `source`, so this is equivalent to starting fzf on
-command line without standard input pipe; fzf will use find command (or
-`$FZF_DEFAULT_COMMAND` if defined) to list the files under the current
-directory. When you select one, it will open it with the sink, `:e` command.
-If you want to open it in a new tab, you can pass `:tabedit` command instead
-as the sink.
+command line without standard input pipe; fzf will traverse the file system
+under the current directory to get the list of files. (If
+`$FZF_DEFAULT_COMMAND` is set, fzf will use the output of the command
+instead.) When you select one, it will open it with the sink, `:e` command. If
+you want to open it in a new tab, you can pass `:tabedit` command instead as
+the sink.
 
 ```vim
 call fzf#run({'sink': 'tabedit'})
 ```
 
-Instead of using the default find command, you can use any shell command as
-the source. The following example will list the files managed by git. It's
-equivalent to running `git ls-files | fzf` on shell.
+You can use any shell command as the source to generate the list. The
+following example will list the files managed by git. It's equivalent to
+running `git ls-files | fzf` on shell.
 
 ```vim
 call fzf#run({'source': 'git ls-files', 'sink': 'e'})
@@ -276,12 +290,13 @@ The following table summarizes the available options.
 | `source`                   | string        | External command to generate input to fzf (e.g. `find .`)             |
 | `source`                   | list          | Vim list as input to fzf                                              |
 | `sink`                     | string        | Vim command to handle the selected item (e.g. `e`, `tabe`)            |
-| `sink`                     | funcref       | Reference to function to process each selected item                   |
-| `sink*`                    | funcref       | Similar to `sink`, but takes the list of output lines at once         |
+| `sink`                     | funcref       | Function to be called with each selected item                         |
+| `sinklist` (or `sink*`)    | funcref       | Similar to `sink`, but takes the list of output lines at once         |
+| `exit`                     | funcref       | Function to be called with the exit status of fzf (e.g. 0, 1, 2, 130) |
 | `options`                  | string/list   | Options to fzf                                                        |
 | `dir`                      | string        | Working directory                                                     |
 | `up`/`down`/`left`/`right` | number/string | (Layout) Window position and size (e.g. `20`, `50%`)                  |
-| `tmux`                     | string        | (Layout) fzf-tmux options (e.g. `-p90%,60%`)                          |
+| `tmux`                     | string        | (Layout) `--tmux` options (e.g. `90%,70%`)                            |
 | `window` (Vim 8 / Neovim)  | string        | (Layout) Command to open fzf window (e.g. `vertical aboveleft 30new`) |
 | `window` (Vim 8 / Neovim)  | dict          | (Layout) Popup window settings (e.g. `{'width': 0.9, 'height': 0.6}`) |
 
@@ -302,7 +317,8 @@ following options are allowed:
 - Optional:
     - `yoffset` [float default 0.5 range [0 ~ 1]]
     - `xoffset` [float default 0.5 range [0 ~ 1]]
-    - `border` [string default `rounded`]: Border style
+    - `relative` [boolean default v:false]
+    - `border` [string default `rounded` (`sharp` on Windows)]: Border style
         - `rounded` / `sharp` / `horizontal` / `vertical` / `top` / `bottom` / `left` / `right` / `no[ne]`
 
 `fzf#wrap`
@@ -380,7 +396,7 @@ command! -bang -complete=dir -nargs=? LS
 
 - `g:fzf_layout`
 - `g:fzf_action`
-    - **Works only when no custom `sink` (or `sink*`) is provided**
+    - **Works only when no custom `sink` (or `sinklist`) is provided**
         - Having custom sink usually means that each entry is not an ordinary
           file path (e.g. name of color scheme), so we can't blindly apply the
           same strategy (i.e. `tabedit some-color-scheme` doesn't make sense)
@@ -392,15 +408,41 @@ Tips
 
 ### fzf inside terminal buffer
 
-The latest versions of Vim and Neovim include builtin terminal emulator
-(`:terminal`) and fzf will start in a terminal buffer in the following cases:
+On the latest versions of Vim and Neovim, fzf will start in a terminal buffer.
+If you find the default ANSI colors to be different, consider configuring the
+colors using `g:terminal_ansi_colors` in regular Vim or `g:terminal_color_x`
+in Neovim.
 
-- On Neovim
-- On GVim
-- On Terminal Vim with a non-default layout
-    - `call fzf#run({'left': '30%'})` or `let g:fzf_layout = {'left': '30%'}`
+```vim
+" Terminal colors for seoul256 color scheme
+if has('nvim')
+  let g:terminal_color_0 = '#4e4e4e'
+  let g:terminal_color_1 = '#d68787'
+  let g:terminal_color_2 = '#5f865f'
+  let g:terminal_color_3 = '#d8af5f'
+  let g:terminal_color_4 = '#85add4'
+  let g:terminal_color_5 = '#d7afaf'
+  let g:terminal_color_6 = '#87afaf'
+  let g:terminal_color_7 = '#d0d0d0'
+  let g:terminal_color_8 = '#626262'
+  let g:terminal_color_9 = '#d75f87'
+  let g:terminal_color_10 = '#87af87'
+  let g:terminal_color_11 = '#ffd787'
+  let g:terminal_color_12 = '#add4fb'
+  let g:terminal_color_13 = '#ffafaf'
+  let g:terminal_color_14 = '#87d7d7'
+  let g:terminal_color_15 = '#e4e4e4'
+else
+  let g:terminal_ansi_colors = [
+    \ '#4e4e4e', '#d68787', '#5f865f', '#d8af5f',
+    \ '#85add4', '#d7afaf', '#87afaf', '#d0d0d0',
+    \ '#626262', '#d75f87', '#87af87', '#ffd787',
+    \ '#add4fb', '#ffafaf', '#87d7d7', '#e4e4e4'
+  \ ]
+endif
+```
 
-#### Starting fzf in a popup window
+### Starting fzf in a popup window
 
 ```vim
 " Required:
@@ -410,38 +452,40 @@ The latest versions of Vim and Neovim include builtin terminal emulator
 " Optional:
 " - xoffset [float default 0.5 range [0 ~ 1]]
 " - yoffset [float default 0.5 range [0 ~ 1]]
+" - relative [boolean default v:false]
 " - border [string default 'rounded']: Border style
 "   - 'rounded' / 'sharp' / 'horizontal' / 'vertical' / 'top' / 'bottom' / 'left' / 'right'
 let g:fzf_layout = { 'window': { 'width': 0.9, 'height': 0.6 } }
 ```
 
 Alternatively, you can make fzf open in a tmux popup window (requires tmux 3.2
-or above) by putting fzf-tmux options in `tmux` key.
+or above) by putting `--tmux` option value in `tmux` key.
 
 ```vim
-" See `man fzf-tmux` for available options
+" See `--tmux` option in `man fzf` for available options
+" [center|top|bottom|left|right][,SIZE[%]][,SIZE[%]]
 if exists('$TMUX')
-  let g:fzf_layout = { 'tmux': '-p90%,60%' }
+  let g:fzf_layout = { 'tmux': '90%,70%' }
 else
   let g:fzf_layout = { 'window': { 'width': 0.9, 'height': 0.6 } }
 endif
 ```
 
-#### Hide statusline
+### Hide statusline
 
 When fzf starts in a terminal buffer, the file type of the buffer is set to
 `fzf`. So you can set up `FileType fzf` autocmd to customize the settings of
 the window.
 
-For example, if you use a non-popup layout (e.g. `{'down': '40%'}`) on Neovim,
-you might want to temporarily disable the statusline for a cleaner look.
+For example, if you open fzf on the bottom on the screen (e.g. `{'down':
+'40%'}`), you might want to temporarily disable the statusline for a cleaner
+look.
 
 ```vim
-if has('nvim') && !exists('g:fzf_layout')
-  autocmd! FileType fzf
-  autocmd  FileType fzf set laststatus=0 noshowmode noruler
-    \| autocmd BufLeave <buffer> set laststatus=2 showmode ruler
-endif
+let g:fzf_layout = { 'down': '30%' }
+autocmd! FileType fzf
+autocmd  FileType fzf set laststatus=0 noshowmode noruler
+  \| autocmd BufLeave <buffer> set laststatus=2 showmode ruler
 ```
 
 [License](LICENSE)
@@ -449,4 +493,4 @@ endif
 
 The MIT License (MIT)
 
-Copyright (c) 2013-2021 Junegunn Choi
+Copyright (c) 2013-2025 Junegunn Choi

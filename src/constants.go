@@ -2,7 +2,6 @@ package fzf
 
 import (
 	"math"
-	"os"
 	"time"
 
 	"github.com/junegunn/fzf/src/util"
@@ -15,6 +14,7 @@ const (
 
 	// Reader
 	readerBufferSize       = 64 * 1024
+	readerSlabSize         = 128 * 1024
 	readerPollIntervalMin  = 10 * time.Millisecond
 	readerPollIntervalStep = 5 * time.Millisecond
 	readerPollIntervalMax  = 50 * time.Millisecond
@@ -26,8 +26,12 @@ const (
 	previewCancelWait = 500 * time.Millisecond
 	previewChunkDelay = 100 * time.Millisecond
 	previewDelayed    = 500 * time.Millisecond
-	maxPatternLength  = 300
+	maxPatternLength  = 1000
 	maxMulti          = math.MaxInt32
+
+	// Background processes
+	maxBgProcesses          = 30
+	maxBgProcessesPerAction = 3
 
 	// Matcher
 	numPartitionsMultiplier = 8
@@ -54,16 +58,6 @@ const (
 	defaultJumpLabels string = "asdfghjklqwertyuiopzxcvbnm1234567890ASDFGHJKLQWERTYUIOPZXCVBNM`~;:,<.>/?'\"!@#$%^&*()[{]}-_=+"
 )
 
-var defaultCommand string
-
-func init() {
-	if !util.IsWindows() {
-		defaultCommand = `set -o pipefail; command find -L . -mindepth 1 \( -path '*/\.*' -o -fstype 'sysfs' -o -fstype 'devfs' -o -fstype 'devtmpfs' -o -fstype 'proc' \) -prune -o -type f -print -o -type l -print 2> /dev/null | cut -b3-`
-	} else if os.Getenv("TERM") == "cygwin" {
-		defaultCommand = `sh -c "command find -L . -mindepth 1 -path '*/\.*' -prune -o -type f -print -o -type l -print 2> /dev/null | cut -b3-"`
-	}
-}
-
 // fzf events
 const (
 	EvtReadNew util.EventType = iota
@@ -77,9 +71,9 @@ const (
 )
 
 const (
-	exitCancel    = -1
-	exitOk        = 0
-	exitNoMatch   = 1
-	exitError     = 2
-	exitInterrupt = 130
+	ExitOk        = 0
+	ExitNoMatch   = 1
+	ExitError     = 2
+	ExitBecome    = 126
+	ExitInterrupt = 130
 )

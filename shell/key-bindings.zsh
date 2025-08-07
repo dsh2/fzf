@@ -11,6 +11,7 @@
 # - $FZF_ALT_C_COMMAND
 # - $FZF_ALT_C_OPTS
 
+
 # Key bindings
 # ------------
 
@@ -32,57 +33,68 @@ else
   }
 fi
 
-'emulate' 'zsh' '-o' 'no_aliases'
+'builtin' 'emulate' 'zsh' && 'builtin' 'setopt' 'no_aliases'
 
 {
+if [[ -o interactive ]]; then
 
-[[ -o interactive ]] || return 0
+#----BEGIN INCLUDE common.sh
+# NOTE: Do not directly edit this section, which is copied from "common.sh".
+# To modify it, one can edit "common.sh" and run "./update-common.sh" to apply
+# the changes. See code comments in "common.sh" for the implementation details.
+
+__fzf_defaults() {
+  printf '%s\n' "--height ${FZF_TMUX_HEIGHT:-40%} --min-height 20+ --bind=ctrl-z:ignore $1"
+  command cat "${FZF_DEFAULT_OPTS_FILE-}" 2> /dev/null
+  printf '%s\n' "${FZF_DEFAULT_OPTS-} $2"
+}
+
+__fzf_exec_awk() {
+  if [[ -z ${__fzf_awk-} ]]; then
+    __fzf_awk=awk
+    if [[ $OSTYPE == solaris* && -x /usr/xpg4/bin/awk ]]; then
+      __fzf_awk=/usr/xpg4/bin/awk
+    elif command -v mawk >/dev/null 2>&1; then
+      local n x y z d
+      IFS=' .' read -r n x y z d <<< $(command mawk -W version 2> /dev/null)
+      [[ $n == mawk ]] && (( d >= 20230302 && (x * 1000 + y) * 1000 + z >= 1003004 )) && __fzf_awk=mawk
+    fi
+  fi
+  LC_ALL=C exec "$__fzf_awk" "$@"
+}
+#----END INCLUDE
 
 # CTRL-T - Paste the selected file path(s) into the command line
-# TODO: Use a more advanced preview than strings (ranger scope?)
-__fsel() {
-	setopt localoptions pipefail 
-	REPORTTIME=-1
-	FIND_PRINTF='%y%m\t%n\t%TY-%Tm-%Td\t%TH:%TM\t%u:%g\t%kk\t%p\n'
-	FIND_COLUMNS=${(ws:\t:)#FIND_PRINTF}
-	local dir=${LBUFFER[(w)-1]}
-	# local dir="~/.pcap"
-	[[ -d $dir ]] || dir=
-	command find -P $dir \
-		-mindepth 1  \
-		-printf $FIND_PRINTF \
-		2> /dev/null |
-	 $(__fzfcmd) \
-		 --sort \
-		 --multi \
-		 --tabstop=6 \
-		 --preview-window=top:50% \
-		 --preview="
-			echo -n \"file: \";
-			file --brief \
-				--preserve-date \
-				--special-files \
-				--uncompress {$FIND_COLUMNS..}; \
-			strings {$FIND_COLUMNS..}" |
-	while read item; do
-	local file=$(echo $item | cut -f 7-)
-		echo -n "${(q)file} "
-	done
+__fzf_select() {
+  setopt localoptions pipefail no_aliases 2> /dev/null
+  local item
+  FZF_DEFAULT_COMMAND=${FZF_CTRL_T_COMMAND:-} \
+  FZF_DEFAULT_OPTS=$(__fzf_defaults "--reverse --walker=file,dir,follow,hidden --scheme=path" "${FZF_CTRL_T_OPTS-} -m") \
+  FZF_DEFAULT_OPTS_FILE='' $(__fzfcmd) "$@" < /dev/tty | while read -r item; do
+    echo -n -E "${(q)item} "
+  done
+  local ret=$?
+  echo
+  return $ret
 }
 
 __fzfcmd() {
-  [ -n "$TMUX_PANE" ] && { [ "${FZF_TMUX:-0}" != 0 ] || [ -n "$FZF_TMUX_OPTS" ]; } &&
-	echo "fzf-tmux ${FZF_TMUX_OPTS:--d${FZF_TMUX_HEIGHT:-40%}} -- " || echo "fzf"
+  [ -n "${TMUX_PANE-}" ] && { [ "${FZF_TMUX:-0}" != 0 ] || [ -n "${FZF_TMUX_OPTS-}" ]; } &&
+    echo "fzf-tmux ${FZF_TMUX_OPTS:--d${FZF_TMUX_HEIGHT:-40%}} -- " || echo "fzf"
 }
 
 fzf-file-widget() {
-	LBUFFER="${LBUFFER[(w)0,(w)-2]} $(__fsel)"
-	local ret=$?
-	zle reset-prompt
-	return $ret
+  LBUFFER="${LBUFFER}$(__fzf_select)"
+  local ret=$?
+  zle reset-prompt
+  return $ret
 }
-zle     -N   fzf-file-widget
-bindkey '^T' fzf-file-widget
+if [[ "${FZF_CTRL_T_COMMAND-x}" != "" ]]; then
+  zle     -N            fzf-file-widget
+  bindkey -M emacs '^T' fzf-file-widget
+  bindkey -M vicmd '^T' fzf-file-widget
+  bindkey -M viins '^T' fzf-file-widget
+fi
 
 # Ensure precmds are run after cd
 fzf-redraw-prompt() {
@@ -96,10 +108,11 @@ zle -N fzf-redraw-prompt
 
 # ALT-C - cd into the selected directory
 fzf-cd-widget() {
-  local cmd="${FZF_ALT_C_COMMAND:-"command find -L . -mindepth 1 -maxdepth 5 \\( -path '*/\\.*' -o -fstype 'sysfs' -o -fstype 'devfs' -o -fstype 'devtmpfs' -o -fstype 'proc' \\) -prune \
-	-o -type d -print 2> /dev/null | cut -b3-"}"
   setopt localoptions pipefail no_aliases 2> /dev/null
-  local dir="$(eval "$cmd" | FZF_DEFAULT_OPTS="--height ${FZF_TMUX_HEIGHT:-40%} --reverse $FZF_DEFAULT_OPTS $FZF_ALT_C_OPTS" $(__fzfcmd) +m)"
+  local dir="$(
+    FZF_DEFAULT_COMMAND=${FZF_ALT_C_COMMAND:-} \
+    FZF_DEFAULT_OPTS=$(__fzf_defaults "--reverse --walker=dir,follow,hidden --scheme=path" "${FZF_ALT_C_OPTS-} +m") \
+    FZF_DEFAULT_OPTS_FILE='' $(__fzfcmd) < /dev/tty)"
   if [[ -z "$dir" ]]; then
 	zle redisplay
 	return 0
@@ -116,106 +129,47 @@ fzf-cd-widget() {
   zle fzf-redraw-prompt
   return $ret
 }
-zle     -N    fzf-cd-widget
-bindkey '\ec' fzf-cd-widget
+if [[ "${FZF_ALT_C_COMMAND-x}" != "" ]]; then
+  zle     -N             fzf-cd-widget
+  bindkey -M emacs '\ec' fzf-cd-widget
+  bindkey -M vicmd '\ec' fzf-cd-widget
+  bindkey -M viins '\ec' fzf-cd-widget
+fi
 
 # CTRL-R - Paste the selected command from history into the command line
 # TODO: allow --multi and add binding to vimdiff the outputs
 fzf-history-widget() {
-	setopt localoptions noglobsubst noposixbuiltins 
-	local query="${LBUFFER//$/\\$}"
-	local -r time_format='%a %F %T' 
-	local -r aborted_id="ABRT"
-	local -r mode_switch_key=ctrl-space
-	# TODO: rename local to path-local
-	# TODO: add local mode in the sense of zsh terminology
-	# TODO: add path-local-recursive
-	local -a modes
-	modes=("global" "local" "internal")
-	# TODO: make mode persistent across invocation of widget
-	# : ${mode_index:=1}
-	local -i mode_index=1
-	local fzf_prompt="zsh history"
-	local mode_fd_param=""
-	local -a fzf_result
-	while :; do
-		fzf_result=("${(f)$(
-			( 
-			# TODO: Add support for nested abortion
-				[[ -n $ZLE_LINE_ABORTED ]] && 
-					echo -e $aborted_id\\t$(date +$time_format)\ $ZLE_LINE_ABORTED ;
-				fc $=mode_fd_param -rlEDt '%a %F  %T' 1 2> /dev/null | sed 's:[[:space:]]$::' | uniq -f 6
-			) |
-			# TODO: re-enable tmux support
-			# $(__fzfcmd) \
-			fzf \
-			--multi \
-			--no-sort \
-			--preview "
-				echo COMMAND: {7..} | pygmentize -l zsh;
-				# echo EVENT ID: {3..4};
-				tmux-log.sh {1}" \
-			--preview-window up:45%:wrap \
-			--bind "ctrl-v:execute(tmux split -v vim ~/.tmux-log/{1})" \
-			--tiebreak=begin,index  \
-			--print-query \
-			--expect=ctrl-m,$mode_switch_key \
-			--query=$query \
-			--prompt="$modes[$mode_index] $fzf_prompt: "
-		)}") 
-
-		query=$fzf_result[1]
-		local key=$fzf_result[2]
-		case "$key" in
-			"ctrl-m")
-				local new_cmd_line
-				local separator
-				local events=(${fzf_result:2})
-				for event in $events; do
-					local event_id=$event[(w)1]
-					[ ${event_id: -1} = "*" ] && { event_id=${event_id: : -1} }
-					if [[ $event_id == $aborted_id ]]; then
-						new_cmd_line+=$ZLE_LINE_ABORTED
-					elif (( event_id )) then
-						new_cmd_line+="$separator$history[$event_id]"
-					else
-						zle -M "fc returned illegal event id (event_id = \"$event_id\")."
-					fi
-					separator='; ' 
-					# separator=$'\n'
-				done
-				BUFFER=$new_cmd_line
-				CURSOR=$#new_cmd_line
-				return
-				;;
-			"$mode_switch_key")
-				mode_index=$((mode_index % $#modes + 1))
-				case "$modes[$mode_index]" in
-					"global") 
-						mode_fd_param=""
-						fc -P 
-						;;
-					"local") 
-						mode_fd_param=""
-						fc -ap $(zloc_file)
-						;;
-					"internal") 
-						mode_fd_param="-I"
-						fc -P 
-						;;
-					*)
-						print "Illegal mode encountered"; sleep 5
-				esac
-				;;
-			*)
-				# zle redisplay
-				# zle -M "fzf returned empty key."
-				return
-		esac
-	done
+  local selected
+  setopt localoptions noglobsubst noposixbuiltins pipefail no_aliases noglob nobash_rematch 2> /dev/null
+  # Ensure the module is loaded if not already, and the required features, such
+  # as the associative 'history' array, which maps event numbers to full history
+  # lines, are set. Also, make sure Perl is installed for multi-line output.
+  if zmodload -F zsh/parameter p:{commands,history} 2>/dev/null && (( ${+commands[perl]} )); then
+    selected="$(printf '%s\t%s\000' "${(kv)history[@]}" |
+      perl -0 -ne 'if (!$seen{(/^\s*[0-9]+\**\t(.*)/s, $1)}++) { s/\n/\n\t/g; print; }' |
+      FZF_DEFAULT_OPTS=$(__fzf_defaults "" "-n2..,.. --scheme=history --bind=ctrl-r:toggle-sort --wrap-sign '\t↳ ' --highlight-line ${FZF_CTRL_R_OPTS-} --query=${(qqq)LBUFFER} +m --read0") \
+      FZF_DEFAULT_OPTS_FILE='' $(__fzfcmd))"
+  else
+    selected="$(fc -rl 1 | __fzf_exec_awk '{ cmd=$0; sub(/^[ \t]*[0-9]+\**[ \t]+/, "", cmd); if (!seen[cmd]++) print $0 }' |
+      FZF_DEFAULT_OPTS=$(__fzf_defaults "" "-n2..,.. --scheme=history --bind=ctrl-r:toggle-sort --wrap-sign '\t↳ ' --highlight-line ${FZF_CTRL_R_OPTS-} --query=${(qqq)LBUFFER} +m") \
+      FZF_DEFAULT_OPTS_FILE='' $(__fzfcmd))"
+  fi
+  local ret=$?
+  if [ -n "$selected" ]; then
+    if [[ $(__fzf_exec_awk '{print $1; exit}' <<< "$selected") =~ ^[1-9][0-9]* ]]; then
+      zle vi-fetch-history -n $MATCH
+    else # selected is a custom query, not from history
+      LBUFFER="$selected"
+    fi
+  fi
+  zle reset-prompt
+  return $ret
 }
-zle     -N   fzf-history-widget
-bindkey '^R' fzf-history-widget
+zle     -N            fzf-history-widget
+bindkey -M emacs '^R' fzf-history-widget
+bindkey -M vicmd '^R' fzf-history-widget
+bindkey -M viins '^R' fzf-history-widget
+fi
 
 } always {
   eval $__fzf_key_bindings_options

@@ -1,5 +1,3 @@
-// +build !tcell
-
 package fzf
 
 import (
@@ -56,9 +54,9 @@ func TestResultRank(t *testing.T) {
 	// FIXME global
 	sortCriteria = []criterion{byScore, byLength}
 
-	strs := [][]rune{[]rune("foo"), []rune("foobar"), []rune("bar"), []rune("baz")}
+	str := []rune("foo")
 	item1 := buildResult(
-		withIndex(&Item{text: util.RunesToChars(strs[0])}, 1), []Offset{}, 2)
+		withIndex(&Item{text: util.RunesToChars(str)}, 1), []Offset{}, 2)
 	if item1.points[3] != math.MaxUint16-2 || // Bonus
 		item1.points[2] != 3 || // Length
 		item1.points[1] != 0 || // Unused
@@ -67,7 +65,7 @@ func TestResultRank(t *testing.T) {
 		t.Error(item1)
 	}
 	// Only differ in index
-	item2 := buildResult(&Item{text: util.RunesToChars(strs[0])}, []Offset{}, 2)
+	item2 := buildResult(&Item{text: util.RunesToChars(str)}, []Offset{}, 2)
 
 	items := []Result{item1, item2}
 	sort.Sort(ByRelevance(items))
@@ -100,23 +98,40 @@ func TestResultRank(t *testing.T) {
 	}
 }
 
+func TestChunkTiebreak(t *testing.T) {
+	// FIXME global
+	sortCriteria = []criterion{byScore, byChunk}
+
+	score := 100
+	test := func(input string, offset Offset, chunk string) {
+		item := buildResult(withIndex(&Item{text: util.RunesToChars([]rune(input))}, 1), []Offset{offset}, score)
+		if !(item.points[3] == math.MaxUint16-uint16(score) && item.points[2] == uint16(len(chunk))) {
+			t.Error(item.points)
+		}
+	}
+	test("hello foobar goodbye", Offset{8, 9}, "foobar")
+	test("hello foobar goodbye", Offset{7, 18}, "foobar goodbye")
+	test("hello foobar goodbye", Offset{0, 1}, "hello")
+	test("hello foobar goodbye", Offset{5, 7}, "hello foobar") // TBD
+}
+
 func TestColorOffset(t *testing.T) {
 	// ------------ 20 ----  --  ----
 	//   ++++++++        ++++++++++
 	// --++++++++--    --++++++++++---
 
-	offsets := []Offset{{5, 15}, {25, 35}}
+	offsets := []Offset{{5, 15}, {10, 12}, {25, 35}}
 	item := Result{
 		item: &Item{
 			colors: &[]ansiOffset{
-				{[2]int32{0, 20}, ansiState{1, 5, 0, -1}},
-				{[2]int32{22, 27}, ansiState{2, 6, tui.Bold, -1}},
-				{[2]int32{30, 32}, ansiState{3, 7, 0, -1}},
-				{[2]int32{33, 40}, ansiState{4, 8, tui.Bold, -1}}}}}
+				{[2]int32{0, 20}, ansiState{1, 5, 0, -1, nil}},
+				{[2]int32{22, 27}, ansiState{2, 6, tui.Bold, -1, nil}},
+				{[2]int32{30, 32}, ansiState{3, 7, 0, -1, nil}},
+				{[2]int32{33, 40}, ansiState{4, 8, tui.Bold, -1, nil}}}}}
 
 	colBase := tui.NewColorPair(89, 189, tui.AttrUndefined)
 	colMatch := tui.NewColorPair(99, 199, tui.AttrUndefined)
-	colors := item.colorOffsets(offsets, tui.Dark256, colBase, colMatch, true)
+	colors := item.colorOffsets(offsets, nil, tui.Dark256, colBase, colMatch, tui.AttrUndefined)
 	assert := func(idx int, b int32, e int32, c tui.ColorPair) {
 		o := colors[idx]
 		if o.offset[0] != b || o.offset[1] != e || o.color != c {
@@ -140,20 +155,30 @@ func TestColorOffset(t *testing.T) {
 
 	colRegular := tui.NewColorPair(-1, -1, tui.AttrUndefined)
 	colUnderline := tui.NewColorPair(-1, -1, tui.Underline)
-	colors = item.colorOffsets(offsets, tui.Dark256, colRegular, colUnderline, true)
 
-	// [{[0 5] {1 5 0}} {[5 15] {1 5 8}} {[15 20] {1 5 0}}
-	//  {[22 25] {2 6 1}} {[25 27] {2 6 9}} {[27 30] {-1 -1 8}}
-	//  {[30 32] {3 7 8}} {[32 33] {-1 -1 8}} {[33 35] {4 8 9}}
-	//  {[35 40] {4 8 1}}]
-	assert(0, 0, 5, tui.NewColorPair(1, 5, tui.AttrUndefined))
-	assert(1, 5, 15, tui.NewColorPair(1, 5, tui.Underline))
-	assert(2, 15, 20, tui.NewColorPair(1, 5, tui.AttrUndefined))
-	assert(3, 22, 25, tui.NewColorPair(2, 6, tui.Bold))
-	assert(4, 25, 27, tui.NewColorPair(2, 6, tui.Bold|tui.Underline))
-	assert(5, 27, 30, colUnderline)
-	assert(6, 30, 32, tui.NewColorPair(3, 7, tui.Underline))
-	assert(7, 32, 33, colUnderline)
-	assert(8, 33, 35, tui.NewColorPair(4, 8, tui.Bold|tui.Underline))
-	assert(9, 35, 40, tui.NewColorPair(4, 8, tui.Bold))
+	nthOffsets := []Offset{{37, 39}, {42, 45}}
+	for _, attr := range []tui.Attr{tui.AttrRegular, tui.StrikeThrough} {
+		colors = item.colorOffsets(offsets, nthOffsets, tui.Dark256, colRegular, colUnderline, attr)
+
+		// [{[0 5] {1 5 0}} {[5 15] {1 5 8}} {[15 20] {1 5 0}}
+		//  {[22 25] {2 6 1}} {[25 27] {2 6 9}} {[27 30] {-1 -1 8}}
+		//  {[30 32] {3 7 8}} {[32 33] {-1 -1 8}} {[33 35] {4 8 9}}
+		//  {[35 37] {4 8 1}} {[37 39] {4 8 x|1}} {[39 40] {4 8 x|1}}]
+		assert(0, 0, 5, tui.NewColorPair(1, 5, tui.AttrUndefined))
+		assert(1, 5, 15, tui.NewColorPair(1, 5, tui.Underline))
+		assert(2, 15, 20, tui.NewColorPair(1, 5, tui.AttrUndefined))
+		assert(3, 22, 25, tui.NewColorPair(2, 6, tui.Bold))
+		assert(4, 25, 27, tui.NewColorPair(2, 6, tui.Bold|tui.Underline))
+		assert(5, 27, 30, colUnderline)
+		assert(6, 30, 32, tui.NewColorPair(3, 7, tui.Underline))
+		assert(7, 32, 33, colUnderline)
+		assert(8, 33, 35, tui.NewColorPair(4, 8, tui.Bold|tui.Underline))
+		assert(9, 35, 37, tui.NewColorPair(4, 8, tui.Bold))
+		expected := tui.Bold | attr
+		if attr == tui.AttrRegular {
+			expected = tui.Bold
+		}
+		assert(10, 37, 39, tui.NewColorPair(4, 8, expected))
+		assert(11, 39, 40, tui.NewColorPair(4, 8, tui.Bold))
+	}
 }

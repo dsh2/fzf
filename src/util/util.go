@@ -3,26 +3,56 @@ package util
 import (
 	"math"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-isatty"
-	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 )
 
-var _runeWidths = make(map[rune]int)
+// StringWidth returns string width where each CR/LF character takes 1 column
+func StringWidth(s string) int {
+	return uniseg.StringWidth(s) + strings.Count(s, "\n") + strings.Count(s, "\r")
+}
 
-// RuneWidth returns rune width
-func RuneWidth(r rune, prefixWidth int, tabstop int) int {
-	if r == '\t' {
-		return tabstop - prefixWidth%tabstop
-	} else if w, found := _runeWidths[r]; found {
-		return w
-	} else if r == '\n' || r == '\r' {
-		return 1
+// RunesWidth returns runes width
+func RunesWidth(runes []rune, prefixWidth int, tabstop int, limit int) (int, int) {
+	width := 0
+	gr := uniseg.NewGraphemes(string(runes))
+	idx := 0
+	for gr.Next() {
+		rs := gr.Runes()
+		var w int
+		if len(rs) == 1 && rs[0] == '\t' {
+			w = tabstop - (prefixWidth+width)%tabstop
+		} else {
+			w = StringWidth(string(rs))
+		}
+		width += w
+		if width > limit {
+			return width, idx
+		}
+		idx += len(rs)
 	}
-	w := runewidth.RuneWidth(r)
-	_runeWidths[r] = w
-	return w
+	return width, -1
+}
+
+// Truncate returns the truncated runes and its width
+func Truncate(input string, limit int) ([]rune, int) {
+	runes := []rune{}
+	width := 0
+	gr := uniseg.NewGraphemes(input)
+	for gr.Next() {
+		rs := gr.Runes()
+		w := StringWidth(string(rs))
+		if width+w > limit {
+			return runes, width
+		}
+		width += w
+		runes = append(runes, rs...)
+	}
+	return runes, width
 }
 
 // Max returns the largest integer
@@ -67,24 +97,12 @@ func Min32(first int32, second int32) int32 {
 
 // Constrain32 limits the given 32-bit integer with the upper and lower bounds
 func Constrain32(val int32, min int32, max int32) int32 {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
+	return Max32(Min32(val, max), min)
 }
 
 // Constrain limits the given integer with the upper and lower bounds
 func Constrain(val int, min int, max int) int {
-	if val < min {
-		return min
-	}
-	if val > max {
-		return max
-	}
-	return val
+	return Max(Min(val, max), min)
 }
 
 func AsUint16(val int) uint16 {
@@ -108,9 +126,20 @@ func DurWithin(
 	return val
 }
 
-// IsTty returns true is stdin is a terminal
-func IsTty() bool {
-	return isatty.IsTerminal(os.Stdin.Fd())
+// IsTty returns true if the file is a terminal
+func IsTty(file *os.File) bool {
+	fd := file.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
+}
+
+// RunOnce runs the given function only once
+func RunOnce(f func()) func() {
+	once := Once(true)
+	return func() {
+		if once() {
+			f()
+		}
+	}
 }
 
 // Once returns a function that returns the specified boolean value only once
@@ -118,7 +147,70 @@ func Once(nextResponse bool) func() bool {
 	state := nextResponse
 	return func() bool {
 		prevState := state
-		state = false
+		state = !nextResponse
 		return prevState
 	}
+}
+
+// RepeatToFill repeats the given string to fill the given width
+func RepeatToFill(str string, length int, limit int) string {
+	times := limit / length
+	rest := limit % length
+	output := strings.Repeat(str, times)
+	if rest > 0 {
+		for _, r := range str {
+			rest -= uniseg.StringWidth(string(r))
+			if rest < 0 {
+				break
+			}
+			output += string(r)
+			if rest == 0 {
+				break
+			}
+		}
+	}
+	return output
+}
+
+// ToKebabCase converts the given CamelCase string to kebab-case
+func ToKebabCase(s string) string {
+	name := ""
+	for i, r := range s {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			name += "-"
+		}
+		name += string(r)
+	}
+	return strings.ToLower(name)
+}
+
+// CompareVersions compares two version strings
+func CompareVersions(v1, v2 string) int {
+	parts1 := strings.Split(v1, ".")
+	parts2 := strings.Split(v2, ".")
+
+	atoi := func(s string) int {
+		n, e := strconv.Atoi(s)
+		if e != nil {
+			return 0
+		}
+		return n
+	}
+
+	for i := 0; i < Max(len(parts1), len(parts2)); i++ {
+		var p1, p2 int
+		if i < len(parts1) {
+			p1 = atoi(parts1[i])
+		}
+		if i < len(parts2) {
+			p2 = atoi(parts2[i])
+		}
+
+		if p1 > p2 {
+			return 1
+		} else if p1 < p2 {
+			return -1
+		}
+	}
+	return 0
 }

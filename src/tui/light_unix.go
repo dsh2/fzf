@@ -1,23 +1,24 @@
-// +build !windows
+//go:build !windows
 
 package tui
 
 import (
-	"fmt"
+	"errors"
 	"os"
 	"os/exec"
 	"strings"
 	"syscall"
 
 	"github.com/junegunn/fzf/src/util"
-	"golang.org/x/crypto/ssh/terminal"
+	"golang.org/x/sys/unix"
+	"golang.org/x/term"
 )
 
 func IsLightRendererSupported() bool {
 	return true
 }
 
-func (r *LightRenderer) defaultTheme() *ColorTheme {
+func (r *LightRenderer) DefaultTheme() *ColorTheme {
 	if strings.Contains(os.Getenv("TERM"), "256") {
 		return Dark256
 	}
@@ -32,46 +33,56 @@ func (r *LightRenderer) fd() int {
 	return int(r.ttyin.Fd())
 }
 
-func (r *LightRenderer) initPlatform() error {
-	fd := r.fd()
-	origState, err := terminal.GetState(fd)
-	if err != nil {
-		return err
-	}
-	r.origState = origState
-	terminal.MakeRaw(fd)
-	return nil
+func (r *LightRenderer) initPlatform() (err error) {
+	r.origState, err = term.MakeRaw(r.fd())
+	return err
 }
 
 func (r *LightRenderer) closePlatform() {
-	// NOOP
+	r.ttyout.Close()
 }
 
-func openTtyIn() *os.File {
-	in, err := os.OpenFile(consoleDevice, syscall.O_RDONLY, 0)
-	if err != nil {
+func openTty(ttyDefault string, mode int) (*os.File, error) {
+	var in *os.File
+	var err error
+	if len(ttyDefault) > 0 {
+		in, err = os.OpenFile(ttyDefault, mode, 0)
+	}
+	if in == nil || err != nil || ttyDefault != DefaultTtyDevice && !util.IsTty(in) {
 		tty := ttyname()
 		if len(tty) > 0 {
-			if in, err := os.OpenFile(tty, syscall.O_RDONLY, 0); err == nil {
-				return in
+			if in, err := os.OpenFile(tty, mode, 0); err == nil {
+				return in, nil
 			}
 		}
-		fmt.Fprintln(os.Stderr, "Failed to open "+consoleDevice)
-		os.Exit(2)
+		if ttyDefault != DefaultTtyDevice {
+			if in, err = os.OpenFile(DefaultTtyDevice, mode, 0); err == nil {
+				return in, nil
+			}
+		}
+		return nil, errors.New("failed to open " + DefaultTtyDevice)
 	}
-	return in
+	return in, nil
+}
+
+func openTtyIn(ttyDefault string) (*os.File, error) {
+	return openTty(ttyDefault, syscall.O_RDONLY)
+}
+
+func openTtyOut(ttyDefault string) (*os.File, error) {
+	return openTty(ttyDefault, syscall.O_WRONLY)
 }
 
 func (r *LightRenderer) setupTerminal() {
-	terminal.MakeRaw(r.fd())
+	term.MakeRaw(r.fd())
 }
 
 func (r *LightRenderer) restoreTerminal() {
-	terminal.Restore(r.fd(), r.origState)
+	term.Restore(r.fd(), r.origState)
 }
 
 func (r *LightRenderer) updateTerminalSize() {
-	width, height, err := terminal.GetSize(r.fd())
+	width, height, err := term.GetSize(r.fd())
 
 	if err == nil {
 		r.width = width
@@ -85,9 +96,14 @@ func (r *LightRenderer) updateTerminalSize() {
 func (r *LightRenderer) findOffset() (row int, col int) {
 	r.csi("6n")
 	r.flush()
+	var err error
 	bytes := []byte{}
 	for tries := 0; tries < offsetPollTries; tries++ {
-		bytes = r.getBytesInternal(bytes, tries > 0)
+		bytes, err = r.getBytesInternal(bytes, tries > 0)
+		if err != nil {
+			return -1, -1
+		}
+
 		offsets := offsetRegexp.FindSubmatch(bytes)
 		if len(offsets) > 3 {
 			// Add anything we skipped over to the input buffer
@@ -107,4 +123,12 @@ func (r *LightRenderer) getch(nonblock bool) (int, bool) {
 		return 0, false
 	}
 	return int(b[0]), true
+}
+
+func (r *LightRenderer) Size() TermSize {
+	ws, err := unix.IoctlGetWinsize(int(r.ttyin.Fd()), unix.TIOCGWINSZ)
+	if err != nil {
+		return TermSize{}
+	}
+	return TermSize{int(ws.Row), int(ws.Col), int(ws.Xpixel), int(ws.Ypixel)}
 }

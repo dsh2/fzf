@@ -2,16 +2,20 @@ package fzf
 
 import (
 	"fmt"
-	"io/ioutil"
+	"os"
 	"testing"
 
 	"github.com/junegunn/fzf/src/tui"
 )
 
 func TestDelimiterRegex(t *testing.T) {
-	// Valid regex
+	// Valid regex, but a single character -> string
 	delim := delimiterRegexp(".")
-	if delim.regex == nil || delim.str != nil {
+	if delim.regex != nil || *delim.str != "." {
+		t.Error(delim)
+	}
+	delim = delimiterRegexp("|")
+	if delim.regex != nil || *delim.str != "|" {
 		t.Error(delim)
 	}
 	// Broken regex -> string
@@ -65,9 +69,22 @@ func TestDelimiterRegexRegex(t *testing.T) {
 	}
 }
 
+func TestDelimiterRegexRegexCaret(t *testing.T) {
+	delim := delimiterRegexp(`(^\s*|\s+)`)
+	tokens := Tokenize("foo  bar baz", delim)
+	if delim.str != nil ||
+		len(tokens) != 4 ||
+		tokens[0].text.ToString() != "" ||
+		tokens[1].text.ToString() != "foo  " ||
+		tokens[2].text.ToString() != "bar " ||
+		tokens[3].text.ToString() != "baz" {
+		t.Errorf("%s %d", tokens, len(tokens))
+	}
+}
+
 func TestSplitNth(t *testing.T) {
 	{
-		ranges := splitNth("..")
+		ranges, _ := splitNth("..")
 		if len(ranges) != 1 ||
 			ranges[0].begin != rangeEllipsis ||
 			ranges[0].end != rangeEllipsis {
@@ -75,7 +92,7 @@ func TestSplitNth(t *testing.T) {
 		}
 	}
 	{
-		ranges := splitNth("..3,1..,2..3,4..-1,-3..-2,..,2,-2,2..-2,1..-1")
+		ranges, _ := splitNth("..3,1..,2..3,4..-1,-3..-2,..,2,-2,2..-2,1..-1")
 		if len(ranges) != 10 ||
 			ranges[0].begin != rangeEllipsis || ranges[0].end != 3 ||
 			ranges[1].begin != rangeEllipsis || ranges[1].end != rangeEllipsis ||
@@ -93,10 +110,11 @@ func TestSplitNth(t *testing.T) {
 }
 
 func TestIrrelevantNth(t *testing.T) {
+	index := 0
 	{
 		opts := defaultOptions()
 		words := []string{"--nth", "..", "-x"}
-		parseOptions(opts, words)
+		parseOptions(&index, opts, words)
 		postProcessOptions(opts)
 		if len(opts.Nth) != 0 {
 			t.Errorf("nth should be empty: %v", opts.Nth)
@@ -105,7 +123,7 @@ func TestIrrelevantNth(t *testing.T) {
 	for _, words := range [][]string{{"--nth", "..,3", "+x"}, {"--nth", "3,1..", "+x"}, {"--nth", "..-1,1", "+x"}} {
 		{
 			opts := defaultOptions()
-			parseOptions(opts, words)
+			parseOptions(&index, opts, words)
 			postProcessOptions(opts)
 			if len(opts.Nth) != 0 {
 				t.Errorf("nth should be empty: %v", opts.Nth)
@@ -114,7 +132,7 @@ func TestIrrelevantNth(t *testing.T) {
 		{
 			opts := defaultOptions()
 			words = append(words, "-x")
-			parseOptions(opts, words)
+			parseOptions(&index, opts, words)
 			postProcessOptions(opts)
 			if len(opts.Nth) != 2 {
 				t.Errorf("nth should not be empty: %v", opts.Nth)
@@ -124,7 +142,7 @@ func TestIrrelevantNth(t *testing.T) {
 }
 
 func TestParseKeys(t *testing.T) {
-	pairs := parseKeyChords("ctrl-z,alt-z,f2,@,Alt-a,!,ctrl-G,J,g,ctrl-alt-a,ALT-enter,alt-SPACE", "")
+	pairs, _, _ := parseKeyChords("ctrl-z,alt-z,f2,@,Alt-a,!,ctrl-G,J,g,ctrl-alt-a,ALT-enter,alt-SPACE", "")
 	checkEvent := func(e tui.Event, s string) {
 		if pairs[e] != s {
 			t.Errorf("%s != %s", pairs[e], s)
@@ -150,35 +168,35 @@ func TestParseKeys(t *testing.T) {
 	checkEvent(tui.AltKey(' '), "alt-SPACE")
 
 	// Synonyms
-	pairs = parseKeyChords("enter,Return,space,tab,btab,esc,up,down,left,right", "")
+	pairs, _, _ = parseKeyChords("enter,Return,space,tab,btab,esc,up,down,left,right", "")
 	if len(pairs) != 9 {
 		t.Error(9)
 	}
-	check(tui.CtrlM, "Return")
+	check(tui.Enter, "Return")
 	checkEvent(tui.Key(' '), "space")
 	check(tui.Tab, "tab")
-	check(tui.BTab, "btab")
-	check(tui.ESC, "esc")
+	check(tui.ShiftTab, "btab")
+	check(tui.Esc, "esc")
 	check(tui.Up, "up")
 	check(tui.Down, "down")
 	check(tui.Left, "left")
 	check(tui.Right, "right")
 
-	pairs = parseKeyChords("Tab,Ctrl-I,PgUp,page-up,pgdn,Page-Down,Home,End,Alt-BS,Alt-BSpace,shift-left,shift-right,btab,shift-tab,return,Enter,bspace", "")
+	pairs, _, _ = parseKeyChords("Tab,Ctrl-I,PgUp,page-up,pgdn,Page-Down,Home,End,Alt-BS,Alt-BSpace,shift-left,shift-right,btab,shift-tab,return,Enter,bspace", "")
 	if len(pairs) != 11 {
 		t.Error(11)
 	}
 	check(tui.Tab, "Ctrl-I")
-	check(tui.PgUp, "page-up")
-	check(tui.PgDn, "Page-Down")
+	check(tui.PageUp, "page-up")
+	check(tui.PageDown, "Page-Down")
 	check(tui.Home, "Home")
 	check(tui.End, "End")
-	check(tui.AltBS, "Alt-BSpace")
-	check(tui.SLeft, "shift-left")
-	check(tui.SRight, "shift-right")
-	check(tui.BTab, "shift-tab")
-	check(tui.CtrlM, "Enter")
-	check(tui.BSpace, "bspace")
+	check(tui.AltBackspace, "Alt-BSpace")
+	check(tui.ShiftLeft, "shift-left")
+	check(tui.ShiftRight, "shift-right")
+	check(tui.ShiftTab, "shift-tab")
+	check(tui.Enter, "Enter")
+	check(tui.Backspace, "bspace")
 }
 
 func TestParseKeysWithComma(t *testing.T) {
@@ -193,40 +211,40 @@ func TestParseKeysWithComma(t *testing.T) {
 		}
 	}
 
-	pairs := parseKeyChords(",", "")
+	pairs, _, _ := parseKeyChords(",", "")
 	checkN(len(pairs), 1)
 	check(pairs, tui.Key(','), ",")
 
-	pairs = parseKeyChords(",,a,b", "")
+	pairs, _, _ = parseKeyChords(",,a,b", "")
 	checkN(len(pairs), 3)
 	check(pairs, tui.Key('a'), "a")
 	check(pairs, tui.Key('b'), "b")
 	check(pairs, tui.Key(','), ",")
 
-	pairs = parseKeyChords("a,b,,", "")
+	pairs, _, _ = parseKeyChords("a,b,,", "")
 	checkN(len(pairs), 3)
 	check(pairs, tui.Key('a'), "a")
 	check(pairs, tui.Key('b'), "b")
 	check(pairs, tui.Key(','), ",")
 
-	pairs = parseKeyChords("a,,,b", "")
+	pairs, _, _ = parseKeyChords("a,,,b", "")
 	checkN(len(pairs), 3)
 	check(pairs, tui.Key('a'), "a")
 	check(pairs, tui.Key('b'), "b")
 	check(pairs, tui.Key(','), ",")
 
-	pairs = parseKeyChords("a,,,b,c", "")
+	pairs, _, _ = parseKeyChords("a,,,b,c", "")
 	checkN(len(pairs), 4)
 	check(pairs, tui.Key('a'), "a")
 	check(pairs, tui.Key('b'), "b")
 	check(pairs, tui.Key('c'), "c")
 	check(pairs, tui.Key(','), ",")
 
-	pairs = parseKeyChords(",,,", "")
+	pairs, _, _ = parseKeyChords(",,,", "")
 	checkN(len(pairs), 1)
 	check(pairs, tui.Key(','), ",")
 
-	pairs = parseKeyChords(",ALT-,,", "")
+	pairs, _, _ = parseKeyChords(",ALT-,,", "")
 	checkN(len(pairs), 1)
 	check(pairs, tui.AltKey(','), "ALT-,")
 }
@@ -251,7 +269,7 @@ func TestBind(t *testing.T) {
 	check(tui.CtrlA.AsEvent(), "", actBeginningOfLine)
 	parseKeymap(keymap,
 		"ctrl-a:kill-line,ctrl-b:toggle-sort+up+down,c:page-up,alt-z:page-down,"+
-			"f1:execute(ls {+})+abort+execute(echo {+})+select-all,f2:execute/echo {}, {}, {}/,f3:execute[echo '({})'],f4:execute;less {};,"+
+			"f1:execute(ls {+})+abort+execute(echo \n{+})+select-all,f2:execute/echo {}, {}, {}/,f3:execute[echo '({})'],f4:execute;less {};,"+
 			"alt-a:execute-Multi@echo (,),[,],/,:,;,%,{}@,alt-b:execute;echo (,),[,],/,:,@,%,{};,"+
 			"x:Execute(foo+bar),X:execute/bar+baz/"+
 			",f1:+first,f1:+top"+
@@ -283,7 +301,7 @@ func TestBind(t *testing.T) {
 
 func TestColorSpec(t *testing.T) {
 	theme := tui.Dark256
-	dark := parseTheme(theme, "dark")
+	dark, _ := parseTheme(theme, "dark")
 	if *dark != *theme {
 		t.Errorf("colors should be equivalent")
 	}
@@ -291,7 +309,7 @@ func TestColorSpec(t *testing.T) {
 		t.Errorf("point should not be equivalent")
 	}
 
-	light := parseTheme(theme, "dark,light")
+	light, _ := parseTheme(theme, "dark,light")
 	if *light == *theme {
 		t.Errorf("should not be equivalent")
 	}
@@ -302,7 +320,7 @@ func TestColorSpec(t *testing.T) {
 		t.Errorf("point should not be equivalent")
 	}
 
-	customized := parseTheme(theme, "fg:231,bg:232")
+	customized, _ := parseTheme(theme, "fg:231,bg:232")
 	if customized.Fg.Color != 231 || customized.Bg.Color != 232 {
 		t.Errorf("color not customized")
 	}
@@ -315,17 +333,18 @@ func TestColorSpec(t *testing.T) {
 		t.Errorf("colors should now be equivalent: %v, %v", tui.Dark256, customized)
 	}
 
-	customized = parseTheme(theme, "fg:231,dark,bg:232")
+	customized, _ = parseTheme(theme, "fg:231,dark   bg:232")
 	if customized.Fg != tui.Dark256.Fg || customized.Bg == tui.Dark256.Bg {
 		t.Errorf("color not customized")
 	}
 }
 
 func TestDefaultCtrlNP(t *testing.T) {
+	index := 0
 	check := func(words []string, et tui.EventType, expected actionType) {
 		e := et.AsEvent()
 		opts := defaultOptions()
-		parseOptions(opts, words)
+		parseOptions(&index, opts, words)
 		postProcessOptions(opts)
 		if opts.Keymap[e][0].t != expected {
 			t.Error()
@@ -337,22 +356,23 @@ func TestDefaultCtrlNP(t *testing.T) {
 	check([]string{"--bind=ctrl-n:accept"}, tui.CtrlN, actAccept)
 	check([]string{"--bind=ctrl-p:accept"}, tui.CtrlP, actAccept)
 
-	f, _ := ioutil.TempFile("", "fzf-history")
+	f, _ := os.CreateTemp("", "fzf-history")
 	f.Close()
 	hist := "--history=" + f.Name()
 	check([]string{hist}, tui.CtrlN, actNextHistory)
-	check([]string{hist}, tui.CtrlP, actPreviousHistory)
+	check([]string{hist}, tui.CtrlP, actPrevHistory)
 
 	check([]string{hist, "--bind=ctrl-n:accept"}, tui.CtrlN, actAccept)
-	check([]string{hist, "--bind=ctrl-n:accept"}, tui.CtrlP, actPreviousHistory)
+	check([]string{hist, "--bind=ctrl-n:accept"}, tui.CtrlP, actPrevHistory)
 
 	check([]string{hist, "--bind=ctrl-p:accept"}, tui.CtrlN, actNextHistory)
 	check([]string{hist, "--bind=ctrl-p:accept"}, tui.CtrlP, actAccept)
 }
 
 func optsFor(words ...string) *Options {
+	index := 0
 	opts := defaultOptions()
-	parseOptions(opts, words)
+	parseOptions(&index, opts, words)
 	postProcessOptions(opts)
 	return opts
 }
@@ -384,7 +404,7 @@ func TestPreviewOpts(t *testing.T) {
 		opts.Preview.size.size == 50) {
 		t.Error()
 	}
-	opts = optsFor("--preview", "cat {}", "--preview-window=left:15:hidden:wrap:+{1}-/2")
+	opts = optsFor("--preview", "cat {}", "--preview-window=left:15,hidden,wrap:+{1}-/2")
 	if !(opts.Preview.command == "cat {}" &&
 		opts.Preview.hidden == true &&
 		opts.Preview.wrap == true &&
@@ -394,7 +414,7 @@ func TestPreviewOpts(t *testing.T) {
 		opts.Preview.size.size == 15) {
 		t.Error(opts.Preview)
 	}
-	opts = optsFor("--preview-window=up:15:wrap:hidden:+{1}+3-1-2/2", "--preview-window=down", "--preview-window=cycle")
+	opts = optsFor("--preview-window=up,15,wrap,hidden,+{1}+3-1-2/2", "--preview-window=down", "--preview-window=cycle")
 	if !(opts.Preview.command == "" &&
 		opts.Preview.hidden == true &&
 		opts.Preview.wrap == true &&
@@ -438,10 +458,7 @@ func TestValidateSign(t *testing.T) {
 		{"> ", true},
 		{"아", true},
 		{"😀", true},
-		{"", false},
 		{">>>", false},
-		{"\n", false},
-		{"\t", false},
 	}
 
 	for _, testCase := range testCases {
@@ -453,5 +470,37 @@ func TestValidateSign(t *testing.T) {
 		if !testCase.isValid && err == nil {
 			t.Errorf("Input sign `%s` did not cause error", testCase.inputSign)
 		}
+	}
+}
+
+func TestParseSingleActionList(t *testing.T) {
+	actions, _ := parseSingleActionList("Execute@foo+bar,baz@+up+up+reload:down+down")
+	if len(actions) != 4 {
+		t.Errorf("Invalid number of actions parsed:%d", len(actions))
+	}
+	if actions[0].t != actExecute || actions[0].a != "foo+bar,baz" {
+		t.Errorf("Invalid action parsed: %v", actions[0])
+	}
+	if actions[1].t != actUp || actions[2].t != actUp {
+		t.Errorf("Invalid action parsed: %v / %v", actions[1], actions[2])
+	}
+	if actions[3].t != actReload || actions[3].a != "down+down" {
+		t.Errorf("Invalid action parsed: %v", actions[3])
+	}
+}
+
+func TestParseSingleActionListError(t *testing.T) {
+	_, err := parseSingleActionList("change-query(foobar)baz")
+	if err == nil {
+		t.Errorf("Failed to detect error")
+	}
+}
+
+func TestMaskActionContents(t *testing.T) {
+	original := ":execute((f)(o)(o)(b)(a)(r))+change-query@qu@ry@+up,x:reload:hello:world"
+	expected := ":execute                    +change-query       +up,x:reload            "
+	masked := maskActionContents(original)
+	if masked != expected {
+		t.Errorf("Not masked: %s", masked)
 	}
 }
